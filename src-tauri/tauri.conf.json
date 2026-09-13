@@ -44,7 +44,7 @@
   "plugins": {
     "updater": {
       "endpoints": [
-        "https://github.com/GITHUB_USER/liquor-pos/releases/latest/download/latest.json"
+        "https://github.com/jck-bit/liquor-pos/releases/latest/download/latest.json"
       ],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEFDQjRENjgzMERFOEU3QzYKUldURzUrZ05nOWEwckxmbFozZkpSQ0crZDZUY1lGVGUvS3BRVUQ4NTdPc0pZYUpPdU41eEVodkUK"
     }
