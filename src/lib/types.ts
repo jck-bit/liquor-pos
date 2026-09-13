@@ -144,3 +144,17 @@ export interface SyncStatus {
   lastOk: string | null;
   lastError: string | null;
 }
+
+export interface ImportRow {
+  name: string;
+  barcode?: string | null;
+  category?: string | null;
+  sellPrice?: number | null;
+  costPrice?: number | null;
+  stockQty?: number | null;
+}
+export interface ImportResult {
+  created: number;
+  updated: number;
+  skipped: number;
+}

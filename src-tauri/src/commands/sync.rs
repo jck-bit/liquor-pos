@@ -19,11 +19,12 @@ pub fn configure_sync(
     password: String,
 ) -> AppResult<SyncStatus> {
     let owner = require_owner(&session)?;
-    let url = url.trim().to_string();
+    let url = url.trim().trim_end_matches('/').to_string();
     if !url.starts_with("https://") {
         return Err(bad("Supabase URL should look like https://xxxx.supabase.co"));
     }
     let client = Client::new(&url, anon_key.trim())?;
+    client.check_project()?;
     let tokens = client.password_login(email.trim(), &password).map_err(|e| bad(format!("Login failed: {e}")))?;
 
     {

@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
-  AuditEntry, DailyPoint, PaymentMethod, Product, ProductInput, ReceiveLine, Sale, SaleDetail,
+  AuditEntry, DailyPoint, ImportResult, ImportRow, PaymentMethod, Product, ProductInput, ReceiveLine, Sale, SaleDetail,
   SaleInput, SalesSummary, StockMovement, StockValue, SyncStatus, TopProduct, User,
 } from "./types";
 
@@ -23,6 +23,7 @@ export const api = {
   listCategories: () => invoke<string[]>("list_categories"),
   saveProduct: (input: ProductInput) => invoke<Product>("save_product", { input }),
   setProductActive: (productId: number, active: boolean) => invoke<void>("set_product_active", { productId, active }),
+  importProducts: (rows: ImportRow[]) => invoke<ImportResult>("import_products", { rows }),
 
   // stock
   receiveStock: (lines: ReceiveLine[], note?: string) => invoke<void>("receive_stock", { lines, note: note || null }),

@@ -72,6 +72,28 @@ impl Client {
         Ok(Tokens { access: t.access_token, refresh: t.refresh_token, expires_at, user_id: t.user.id })
     }
 
+    /// Confirms the URL really is a Supabase project before we try to log in,
+    /// so a pasted dashboard link or a paused project gets a clear message.
+    pub fn check_project(&self) -> Result<(), String> {
+        let res = self
+            .http
+            .get(format!("{}/auth/v1/health", self.url))
+            .header("apikey", &self.anon)
+            .send()
+            .map_err(|e| format!("Could not reach {}: {e}", self.url))?;
+        match res.status().as_u16() {
+            200 => Ok(()),
+            404 => Err(format!(
+                "{} is not a Supabase project URL. It should look like https://abcdefghijkl.supabase.co \
+                 (Project Settings > API > Project URL), not the dashboard link.",
+                self.url
+            )),
+            401 | 403 => Err("The anon key was rejected. Copy the anon public key from Project Settings > API.".into()),
+            540 | 503 => Err("The Supabase project is paused. Open it in the dashboard and click Restore.".into()),
+            code => Err(format!("Supabase answered HTTP {code} at {}/auth/v1/health", self.url)),
+        }
+    }
+
     pub fn password_login(&self, email: &str, password: &str) -> Result<Tokens, String> {
         self.token_call("password", serde_json::json!({ "email": email, "password": password }))
     }

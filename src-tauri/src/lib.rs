@@ -56,6 +56,7 @@ pub fn run() {
             commands::products::list_categories,
             commands::products::save_product,
             commands::products::set_product_active,
+            commands::products::import_products,
             commands::stock::receive_stock,
             commands::stock::adjust_stock,
             commands::stock::list_stock_movements,

@@ -5,6 +5,46 @@
   import { session, toasts } from "../stores/session.svelte";
   import { fromCents, marginPct, money, toCents } from "../format";
   import Modal from "../components/Modal.svelte";
+  import { detectColumns, parseCsv, rowsToImport, type Mapping } from "../csv";
+  import type { ImportRow } from "../types";
+
+  // CSV import
+  let fileInput = $state<HTMLInputElement | null>(null);
+  let importOpen = $state(false);
+  let importRows = $state<ImportRow[]>([]);
+  let importMapping = $state<Mapping | null>(null);
+  let importing = $state(false);
+
+  async function onFile(e: Event) {
+    const file = (e.currentTarget as HTMLInputElement).files?.[0];
+    if (!file) return;
+    try {
+      const rows = parseCsv(await file.text());
+      if (rows.length < 2) throw new Error("The file has no data rows");
+      importMapping = detectColumns(rows[0]);
+      if (importMapping.columns.name === undefined) throw new Error("Could not find a product name column. Add a header called Name or Product.");
+      importRows = rowsToImport(rows.slice(1), importMapping);
+      importOpen = true;
+    } catch (err) {
+      toasts.error(err);
+    } finally {
+      if (fileInput) fileInput.value = "";
+    }
+  }
+  async function runImport() {
+    importing = true;
+    try {
+      const r = await api.importProducts(importRows);
+      toasts.success(`Imported: ${r.created} new, ${r.updated} updated${r.skipped ? `, ${r.skipped} skipped` : ""}`);
+      importOpen = false;
+      await load();
+    } catch (err) {
+      toasts.error(err);
+    } finally {
+      importing = false;
+    }
+  }
+  const has = (f: keyof ImportRow) => importMapping?.columns[f] !== undefined;
 
   let products = $state<Product[]>([]);
   let categories = $state<string[]>([]);
@@ -94,6 +134,8 @@
       <input class="input search" placeholder="Search name, barcode or category" bind:value={query} oninput={onsearch} />
       <label class="check"><input type="checkbox" bind:checked={showInactive} onchange={load} /> Show inactive</label>
       {#if session.isOwner}
+        <input bind:this={fileInput} type="file" accept=".csv,text/csv" hidden onchange={onFile} />
+        <button class="btn" onclick={() => fileInput?.click()}>Import CSV</button>
         <button class="btn btn-primary" onclick={openNew}>New product</button>
       {/if}
     </div>
@@ -187,7 +229,40 @@
   {/snippet}
 </Modal>
 
+<Modal title="Import products" bind:open={importOpen} width={720}>
+  <div class="stack">
+    <p>
+      Found <strong>{importRows.length}</strong> products. Columns detected:
+      {#each ["name", "barcode", "category", "sellPrice", "costPrice", "stockQty"] as f (f)}
+        <span class="badge {has(f as keyof ImportRow) ? 'badge-green' : 'badge-gray'}">{f === "sellPrice" ? "price" : f === "costPrice" ? "cost" : f === "stockQty" ? "stock" : f}</span>
+      {/each}
+    </p>
+    <p class="muted">Existing products (same barcode or name) are updated and their stock set to the sheet's count. New ones are created with that count as opening stock.</p>
+    <div class="table-wrap preview">
+      <table class="table">
+        <thead><tr><th>Name</th><th>Category</th><th>Barcode</th><th class="num">Price</th><th class="num">Cost</th><th class="num">Stock</th></tr></thead>
+        <tbody>
+          {#each importRows.slice(0, 8) as r, i (i)}
+            <tr>
+              <td>{r.name}</td><td>{r.category ?? ""}</td><td class="mono">{r.barcode ?? ""}</td>
+              <td class="num">{r.sellPrice == null ? "" : money(r.sellPrice)}</td>
+              <td class="num">{r.costPrice == null ? "" : money(r.costPrice)}</td>
+              <td class="num">{r.stockQty ?? ""}</td>
+            </tr>
+          {/each}
+          {#if importRows.length > 8}<tr><td colspan="6" class="muted">… and {importRows.length - 8} more</td></tr>{/if}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {#snippet footer()}
+    <button class="btn" onclick={() => (importOpen = false)}>Cancel</button>
+    <button class="btn btn-primary" onclick={runImport} disabled={importing || !importRows.length}>Import {importRows.length} products</button>
+  {/snippet}
+</Modal>
+
 <style>
   .search { width: 300px; }
+  .preview { max-height: 320px; border: 1px solid var(--border); border-radius: var(--radius); }
   .strong { font-weight: 500; }
 </style>

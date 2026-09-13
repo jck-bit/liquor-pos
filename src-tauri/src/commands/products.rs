@@ -165,3 +165,111 @@ pub fn set_product_active(db: State<Db>, session: State<Session>, product_id: i6
     audit::log(&conn, Some(owner.id), if active { "activate" } else { "deactivate" }, "product", Some(product_id), serde_json::json!({}))?;
     Ok(())
 }
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportRow {
+    pub name: String,
+    pub barcode: Option<String>,
+    pub category: Option<String>,
+    pub sell_price: Option<i64>,
+    pub cost_price: Option<i64>,
+    pub stock_qty: Option<i64>,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportResult {
+    pub created: i64,
+    pub updated: i64,
+    pub skipped: i64,
+}
+
+/// Bulk import from a spreadsheet. Matches existing products by barcode, then by
+/// name (case-insensitive). Existing rows get their prices/category updated and
+/// their stock set to the sheet's count; new rows are created with opening stock.
+/// One transaction: either the whole sheet goes in or none of it.
+#[tauri::command]
+pub fn import_products(db: State<Db>, session: State<Session>, rows: Vec<ImportRow>) -> AppResult<ImportResult> {
+    let owner = require_owner(&session)?;
+    let mut conn = db.lock();
+    let tx = conn.transaction()?;
+    let mut result = ImportResult { created: 0, updated: 0, skipped: 0 };
+
+    for row in rows {
+        let name = row.name.split_whitespace().collect::<Vec<_>>().join(" ");
+        if name.is_empty() {
+            result.skipped += 1;
+            continue;
+        }
+        let barcode = clean(row.barcode);
+        let category = clean(row.category);
+
+        let existing: Option<(i64, i64)> = match &barcode {
+            Some(code) => tx
+                .query_row("SELECT id, stock_qty FROM products WHERE barcode = ?1", params![code], |r| Ok((r.get(0)?, r.get(1)?)))
+                .optional()?,
+            None => None,
+        }
+        .or(tx
+            .query_row("SELECT id, stock_qty FROM products WHERE name = ?1 COLLATE NOCASE", params![name], |r| Ok((r.get(0)?, r.get(1)?)))
+            .optional()?);
+
+        match existing {
+            Some((id, current_stock)) => {
+                tx.execute(
+                    "UPDATE products SET
+                        category = COALESCE(?1, category),
+                        sell_price = COALESCE(?2, sell_price),
+                        cost_price = COALESCE(?3, cost_price),
+                        barcode = COALESCE(?4, barcode),
+                        active = 1,
+                        updated_at = datetime('now', 'localtime')
+                     WHERE id = ?5",
+                    params![category, row.sell_price, row.cost_price, barcode, id],
+                )?;
+                if let Some(target) = row.stock_qty {
+                    let delta = target - current_stock;
+                    if delta != 0 {
+                        tx.execute(
+                            "UPDATE products SET stock_qty = ?1 WHERE id = ?2",
+                            params![target, id],
+                        )?;
+                        tx.execute(
+                            "INSERT INTO stock_movements (product_id, qty_delta, reason, note, user_id) VALUES (?1, ?2, 'count', 'Set by import', ?3)",
+                            params![id, delta, owner.id],
+                        )?;
+                    }
+                }
+                result.updated += 1;
+            }
+            None => {
+                let stock = row.stock_qty.unwrap_or(0).max(0);
+                tx.execute(
+                    "INSERT INTO products (barcode, name, category, cost_price, sell_price, stock_qty)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    params![barcode, name, category, row.cost_price.unwrap_or(0), row.sell_price.unwrap_or(0), stock],
+                )?;
+                let id = tx.last_insert_rowid();
+                if stock > 0 {
+                    tx.execute(
+                        "INSERT INTO stock_movements (product_id, qty_delta, reason, note, user_id) VALUES (?1, ?2, 'purchase', 'Opening stock from import', ?3)",
+                        params![id, stock, owner.id],
+                    )?;
+                }
+                result.created += 1;
+            }
+        }
+    }
+
+    audit::log(
+        &tx,
+        Some(owner.id),
+        "import",
+        "product",
+        None,
+        serde_json::json!({ "created": result.created, "updated": result.updated, "skipped": result.skipped }),
+    )?;
+    tx.commit()?;
+    Ok(result)
+}
