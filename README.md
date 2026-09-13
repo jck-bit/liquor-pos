@@ -75,7 +75,15 @@ Everything is built in the cloud by GitHub Actions. You never need a Windows PC.
 
    Back up `~/.tauri/liquorpos.key` somewhere safe. Updates are signed with it; if it is lost, installed copies can never update again and would need a fresh install.
 
-### Every release
+### Every release (from this Mac, no GitHub Actions needed)
+
+```sh
+npm run release:windows -- 0.2.0
+```
+
+That sets the version in both config files, commits, cross-compiles the Windows installer, signs it, and publishes it with `latest.json` to GitHub Releases. Installed copies show the update bar on next launch. One-time tooling for this: `brew install nsis llvm`, `cargo install cargo-xwin`, `rustup target add x86_64-pc-windows-msvc`.
+
+### Every release (GitHub Actions, once billing is unlocked)
 
 1. Bump the version in **both** `package.json` and `src-tauri/tauri.conf.json` (they must match the tag).
 2. Commit, tag and push:

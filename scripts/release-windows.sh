@@ -2,7 +2,8 @@
 # Build the Windows installer on this Mac and publish it as a GitHub Release,
 # including the latest.json that installed copies poll for updates.
 #
-# Usage: npm run release:windows
+# Usage: npm run release:windows -- 0.2.0   (bumps both version files, commits, builds, publishes)
+#        npm run release:windows            (uses the version already in the config files)
 # Needs: brew install nsis llvm; cargo install cargo-xwin; rustup target add x86_64-pc-windows-msvc;
 #        gh auth login; ~/.tauri/liquorpos.key
 set -euo pipefail
@@ -13,6 +14,20 @@ KEY_FILE="${TAURI_SIGNING_PRIVATE_KEY_PATH:-$HOME/.tauri/liquorpos.key}"
 [ -f "$KEY_FILE" ] || { echo "Signing key not found at $KEY_FILE" >&2; exit 1; }
 export TAURI_SIGNING_PRIVATE_KEY="$(cat "$KEY_FILE")"
 export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}"
+
+# Optional: pass the new version as the first argument to bump both config files and commit.
+if [ -n "${1:-}" ]; then
+  NEW="$1"
+  [[ "$NEW" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Version must look like 0.2.0" >&2; exit 1; }
+  node -e '
+const fs = require("fs"); const v = process.argv[1];
+for (const f of ["package.json", "src-tauri/tauri.conf.json"]) {
+  const j = JSON.parse(fs.readFileSync(f)); j.version = v; fs.writeFileSync(f, JSON.stringify(j, null, 2) + "\n");
+}' "$NEW"
+  git add package.json src-tauri/tauri.conf.json
+  git commit -q -m "Release v$NEW" || true
+  git push -q origin HEAD
+fi
 
 VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
 PKG_VERSION=$(node -p "require('./package.json').version")
