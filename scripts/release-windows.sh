@@ -9,7 +9,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 export PATH="$HOME/.cargo/bin:/opt/homebrew/opt/llvm/bin:$PATH"
-export TAURI_SIGNING_PRIVATE_KEY_PATH="${TAURI_SIGNING_PRIVATE_KEY_PATH:-$HOME/.tauri/liquorpos.key}"
+KEY_FILE="${TAURI_SIGNING_PRIVATE_KEY_PATH:-$HOME/.tauri/liquorpos.key}"
+[ -f "$KEY_FILE" ] || { echo "Signing key not found at $KEY_FILE" >&2; exit 1; }
+export TAURI_SIGNING_PRIVATE_KEY="$(cat "$KEY_FILE")"
 export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}"
 
 VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
