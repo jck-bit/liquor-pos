@@ -10,6 +10,7 @@ Offline point-of-sale and inventory for a liquor store. One small Windows instal
 - **Audit trail**: every sale, void, price change, stock adjustment and login is logged with who and when. Voided sales are kept, never deleted.
 - **Users**: owner and cashier roles with PIN login.
 - **Backup**: one-click copy of the database to Documents.
+- **Cloud sync**: offline-first. SQLite on the till is the source of truth; every change is queued and pushed to Supabase whenever there is internet. Product and price edits made in Supabase flow back down to the till.
 
 First login: username `admin`, PIN `1234`. Change it under Settings on day one.
 
@@ -33,11 +34,14 @@ src/                    Svelte frontend
   lib/stores/           session (user, settings, current screen), cart
   lib/components/       Modal, Toasts, Sidebar, ProductPicker (scanner input), DateRange, Receipt
   lib/screens/          Login, Sell, Products, Stock, Sales, Reports, Audit, Users, Settings
+supabase/schema.sql     cloud tables + RLS, run once in the Supabase SQL editor
 src-tauri/
-  migrations/001_init.sql   schema (add 002_*.sql for future changes, register in db.rs)
+  migrations/001_init.sql   schema (add 003_*.sql for future changes, register in db.rs)
+  migrations/002_sync.sql   sync queue table and triggers
+  src/sync/             background cloud sync worker and Supabase client
   src/db.rs             connection, pragmas, migrations
   src/models.rs         structs shared with the frontend (serialised camelCase)
-  src/commands/         one file per area: auth, users, products, stock, sales, reports, audit, system
+  src/commands/         one file per area: auth, users, products, stock, sales, reports, audit, system, sync
   src/lib.rs            registers every command
 .github/workflows/      builds the Windows installer in the cloud
 ```
@@ -92,6 +96,31 @@ On every launch the app checks the release page. If a newer version exists, an o
 
 The Windows installer includes a bootstrapper for Microsoft WebView2, which Windows 10 and 11 normally already have.
 
+## Cloud sync with Supabase
+
+The till never waits on the network. Triggers in SQLite (`src-tauri/migrations/002_sync.sql`) copy every insert and update into a `sync_outbox` queue in the same transaction as the change. A background thread (`src-tauri/src/sync/`) pushes the queue every 30 seconds, or immediately when you click "Sync now", and then pulls product edits made in the cloud. If the internet is down the queue simply grows and the sidebar shows "Offline · N waiting".
+
+### One-time setup
+
+1. Create a free project at supabase.com.
+2. **SQL Editor > New query**, paste the contents of `supabase/schema.sql`, Run. This creates the tables, Row Level Security and a `daily_sales` view.
+3. **Authentication > Users > Add user**: create a user for the store, e.g. `till@yourstore.co.ke` with a strong password. Untick "send confirmation email" or confirm it. This account *is* the store: every row it pushes is tagged with its user id and nobody else can read it.
+4. **Project Settings > API**: copy the Project URL and the `anon` public key.
+5. In the app, log in as owner, **Settings > Cloud sync**, paste the URL, anon key, store email and password, click **Connect**. The app verifies the login before saving.
+
+### What syncs
+
+| Direction | Data |
+|---|---|
+| Till → cloud | products, sales, sale items, stock movements, audit log, users (never PINs) |
+| Cloud → till | product name, barcode, category, prices, reorder level, active flag. New products created in the cloud appear on the till. Stock quantity is owned by the till. |
+
+Each row has a globally unique `uid`, so several tills can push into one store later without id clashes.
+
+### Looking at the data
+
+Open **Table Editor** in Supabase, or query the `daily_sales` view. Anything that reads Supabase (a web dashboard, a Google Sheet, a phone app) can be built on top later without touching the till.
+
 ## On the store's PC
 
 - Plug in any USB barcode scanner. It acts as a keyboard; no drivers or setup.
@@ -115,4 +144,4 @@ The Windows installer includes a bootstrapper for Microsoft WebView2, which Wind
 - Daraja API (real-time Buy Goods payments) once the store has a registered till
 - Thermal printer direct printing (ESC/POS) without the print dialog
 - Multiple tills syncing to one owner dashboard
-- Supabase sync: local SQLite stays the source of truth, sales and stock are mirrored to Postgres so the owner can see them from anywhere
+- Owner web dashboard on top of the Supabase tables

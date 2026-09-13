@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AuditEntry, DailyPoint, PaymentMethod, Product, ProductInput, ReceiveLine, Sale, SaleDetail,
-  SaleInput, SalesSummary, StockMovement, StockValue, TopProduct, User,
+  SaleInput, SalesSummary, StockMovement, StockValue, SyncStatus, TopProduct, User,
 } from "./types";
 
 /** Thin typed wrapper over every backend command. Errors reject with a plain message string. */
@@ -52,4 +52,11 @@ export const api = {
   updateSettings: (values: Record<string, string>) => invoke<void>("update_settings", { values }),
   backupDatabase: () => invoke<string>("backup_database"),
   databasePath: () => invoke<string>("database_path"),
+
+  // cloud sync
+  configureSync: (url: string, anonKey: string, email: string, password: string) =>
+    invoke<SyncStatus>("configure_sync", { url, anonKey, email, password }),
+  disableSync: () => invoke<void>("disable_sync"),
+  syncNow: () => invoke<void>("sync_now"),
+  syncStatus: () => invoke<SyncStatus>("sync_status"),
 };

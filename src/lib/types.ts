@@ -134,3 +134,13 @@ export interface StockValue {
   retailValue: number;
   lowStockCount: number;
 }
+
+export interface SyncStatus {
+  configured: boolean;
+  connected: boolean;
+  syncing: boolean;
+  pending: number;
+  email: string | null;
+  lastOk: string | null;
+  lastError: string | null;
+}

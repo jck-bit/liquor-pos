@@ -2,6 +2,7 @@ mod commands;
 mod db;
 mod error;
 mod models;
+mod sync;
 
 use std::sync::Mutex;
 
@@ -20,6 +21,10 @@ fn seed_default_owner(conn: &rusqlite::Connection) -> error::AppResult<()> {
             params![hash],
         )?;
     }
+    conn.execute(
+        "INSERT OR IGNORE INTO settings (key, value) VALUES ('device_id', lower(hex(randomblob(8))))",
+        [],
+    )?;
     Ok(())
 }
 
@@ -35,6 +40,7 @@ pub fn run() {
             seed_default_owner(&conn)?;
             app.manage(db::Db(Mutex::new(conn)));
             app.manage(Session::default());
+            sync::start(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -68,6 +74,10 @@ pub fn run() {
             commands::system::update_settings,
             commands::system::backup_database,
             commands::system::database_path,
+            commands::sync::configure_sync,
+            commands::sync::disable_sync,
+            commands::sync::sync_now,
+            commands::sync::sync_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Liquor POS");

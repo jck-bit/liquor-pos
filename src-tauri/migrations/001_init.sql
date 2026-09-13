@@ -2,6 +2,7 @@
 
 CREATE TABLE users (
   id          INTEGER PRIMARY KEY,
+  uid         TEXT NOT NULL UNIQUE DEFAULT (lower(hex(randomblob(16)))),
   username    TEXT NOT NULL UNIQUE COLLATE NOCASE,
   pin_hash    TEXT NOT NULL,
   role        TEXT NOT NULL CHECK (role IN ('owner', 'cashier')),
@@ -11,6 +12,7 @@ CREATE TABLE users (
 
 CREATE TABLE products (
   id             INTEGER PRIMARY KEY,
+  uid         TEXT NOT NULL UNIQUE DEFAULT (lower(hex(randomblob(16)))),
   barcode        TEXT UNIQUE,
   name           TEXT NOT NULL,
   category       TEXT,
@@ -27,6 +29,7 @@ CREATE INDEX idx_products_category ON products(category);
 
 CREATE TABLE sales (
   id              INTEGER PRIMARY KEY,
+  uid         TEXT NOT NULL UNIQUE DEFAULT (lower(hex(randomblob(16)))),
   user_id         INTEGER NOT NULL REFERENCES users(id),
   subtotal        INTEGER NOT NULL,
   discount        INTEGER NOT NULL DEFAULT 0,
@@ -47,6 +50,7 @@ CREATE UNIQUE INDEX idx_sales_mpesa ON sales(mpesa_code) WHERE mpesa_code IS NOT
 
 CREATE TABLE sale_items (
   id            INTEGER PRIMARY KEY,
+  uid         TEXT NOT NULL UNIQUE DEFAULT (lower(hex(randomblob(16)))),
   sale_id       INTEGER NOT NULL REFERENCES sales(id),
   product_id    INTEGER NOT NULL REFERENCES products(id),
   product_name  TEXT NOT NULL,
@@ -60,6 +64,7 @@ CREATE INDEX idx_sale_items_product ON sale_items(product_id);
 
 CREATE TABLE stock_movements (
   id           INTEGER PRIMARY KEY,
+  uid         TEXT NOT NULL UNIQUE DEFAULT (lower(hex(randomblob(16)))),
   product_id   INTEGER NOT NULL REFERENCES products(id),
   qty_delta    INTEGER NOT NULL,
   reason       TEXT NOT NULL CHECK (reason IN ('sale', 'void', 'purchase', 'adjustment', 'damage', 'count')),
@@ -73,6 +78,7 @@ CREATE INDEX idx_stock_moves_created ON stock_movements(created_at);
 
 CREATE TABLE audit_log (
   id          INTEGER PRIMARY KEY,
+  uid         TEXT NOT NULL UNIQUE DEFAULT (lower(hex(randomblob(16)))),
   user_id     INTEGER REFERENCES users(id),
   action      TEXT NOT NULL,
   entity      TEXT NOT NULL,
@@ -89,4 +95,5 @@ CREATE TABLE settings (
 INSERT INTO settings (key, value) VALUES
   ('store_name', 'My Liquor Store'),
   ('receipt_footer', 'Thank you, come again.'),
-  ('allow_negative_stock', '0');
+  ('allow_negative_stock', '0'),
+  ('sync_pulling', '0');

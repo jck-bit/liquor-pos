@@ -4,5 +4,6 @@ pub mod products;
 pub mod reports;
 pub mod sales;
 pub mod stock;
+pub mod sync;
 pub mod system;
 pub mod users;

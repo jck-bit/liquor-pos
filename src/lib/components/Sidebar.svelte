@@ -2,6 +2,26 @@
   import { api } from "../api";
   import { session, toasts, type Screen } from "../stores/session.svelte";
   import { cart } from "../stores/cart.svelte";
+  import { onMount } from "svelte";
+  import type { SyncStatus } from "../types";
+
+  let sync = $state<SyncStatus | null>(null);
+  onMount(() => {
+    const poll = async () => {
+      try { sync = await api.syncStatus(); } catch { /* ignore */ }
+    };
+    poll();
+    const t = setInterval(poll, 10_000);
+    return () => clearInterval(t);
+  });
+  const syncLabel = $derived.by(() => {
+    if (!sync || !sync.configured) return null;
+    if (sync.syncing) return { dot: "busy", text: "Syncing…" };
+    if (sync.pending > 0 && !sync.connected) return { dot: "off", text: `Offline · ${sync.pending} waiting` };
+    if (sync.pending > 0) return { dot: "busy", text: `${sync.pending} waiting to sync` };
+    if (sync.lastError) return { dot: "off", text: "Sync error" };
+    return { dot: "ok", text: "Cloud synced" };
+  });
 
   const items: { key: Screen; label: string; owner?: boolean }[] = [
     { key: "sell", label: "Sell" },
@@ -42,6 +62,11 @@
       {/if}
     {/each}
   </ul>
+  {#if syncLabel}
+    <button class="sync" title={sync?.lastError ?? sync?.lastOk ?? ""} onclick={() => api.syncNow().catch(() => {})}>
+      <span class="dot {syncLabel.dot}"></span>{syncLabel.text}
+    </button>
+  {/if}
   <div class="user">
     <div>
       <div class="who">{session.user?.username}</div>
@@ -66,6 +91,13 @@
   }
   li button:hover { background: var(--sidebar-active); color: #fff; }
   li button.active { background: var(--sidebar-active); color: #fff; box-shadow: inset 3px 0 0 var(--accent); }
+  .sync { margin-top: auto; border: 0; background: transparent; color: inherit; cursor: pointer; text-align: left; font-size: 12px; padding: 6px 8px; display: flex; align-items: center; gap: 8px; border-radius: 4px; }
+  .sync:hover { background: var(--sidebar-active); }
+  .sync + .user { margin-top: 0; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #57534e; flex-shrink: 0; }
+  .dot.ok { background: #22c55e; }
+  .dot.busy { background: #f59e0b; }
+  .dot.off { background: #ef4444; }
   .user { margin-top: auto; padding: 12px 8px 0; border-top: 1px solid #292524; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
   .who { color: #fff; font-weight: 500; }
   .role { font-size: 12px; text-transform: capitalize; }

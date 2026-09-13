@@ -18,6 +18,12 @@ impl Serialize for AppError {
     }
 }
 
+impl From<String> for AppError {
+    fn from(s: String) -> Self {
+        AppError::Msg(s)
+    }
+}
+
 pub type AppResult<T> = Result<T, AppError>;
 
 /// A user-facing validation or business-rule error.

@@ -2,6 +2,59 @@
   import { onMount } from "svelte";
   import { api } from "../api";
   import { session, toasts } from "../stores/session.svelte";
+  import type { SyncStatus } from "../types";
+  import { fmtDateTime } from "../format";
+
+  let sync = $state<SyncStatus | null>(null);
+  let sf = $state({ url: "", anonKey: "", email: "", password: "" });
+  let syncBusy = $state(false);
+
+  async function loadSync() {
+    try {
+      sync = await api.syncStatus();
+      const s = session.settings;
+      sf.url = s.supabase_url ?? "";
+      sf.anonKey = s.supabase_anon_key ?? "";
+      sf.email = s.sync_email ?? "";
+    } catch (e) {
+      toasts.error(e);
+    }
+  }
+  async function connectSync(e: Event) {
+    e.preventDefault();
+    syncBusy = true;
+    try {
+      sync = await api.configureSync(sf.url, sf.anonKey, sf.email, sf.password);
+      session.settings = await api.getSettings();
+      sf.password = "";
+      toasts.success("Connected. First sync is running in the background.");
+    } catch (err) {
+      toasts.error(err);
+    } finally {
+      syncBusy = false;
+    }
+  }
+  async function disconnectSync() {
+    syncBusy = true;
+    try {
+      await api.disableSync();
+      session.settings = await api.getSettings();
+      await loadSync();
+      toasts.success("Cloud sync turned off");
+    } catch (err) {
+      toasts.error(err);
+    } finally {
+      syncBusy = false;
+    }
+  }
+  async function syncNow() {
+    try {
+      await api.syncNow();
+      setTimeout(loadSync, 2500);
+    } catch (err) {
+      toasts.error(err);
+    }
+  }
 
   let f = $state({ store_name: "", store_phone: "", store_address: "", receipt_footer: "", allow_negative_stock: false });
   let dbPath = $state("");
@@ -23,6 +76,7 @@
     } catch (e) {
       toasts.error(e);
     }
+    await loadSync();
   });
 
   async function save(e: Event) {
@@ -82,6 +136,33 @@
       </form>
 
       <div class="stack">
+        <form class="card card-body stack" onsubmit={connectSync}>
+          <div class="row between">
+            <h2>Cloud sync (Supabase)</h2>
+            {#if sync?.configured}
+              <span class="badge {sync.connected ? 'badge-green' : 'badge-red'}">{sync.connected ? "Connected" : "Not reachable"}</span>
+            {/if}
+          </div>
+          <p class="muted">Sales, stock and products are saved here first and copied to the cloud whenever there is internet. The till keeps working offline.</p>
+          {#if sync?.configured}
+            <div class="kv"><span class="muted">Account</span><span>{sync.email}</span></div>
+            <div class="kv"><span class="muted">Waiting to upload</span><span class="num">{sync.pending}</span></div>
+            <div class="kv"><span class="muted">Last successful sync</span><span>{sync.lastOk ? fmtDateTime(sync.lastOk) : "never"}</span></div>
+            {#if sync.lastError}<p class="err">{sync.lastError}</p>{/if}
+            <div class="row">
+              <button class="btn" type="button" onclick={syncNow}>Sync now</button>
+              <button class="btn btn-danger" type="button" onclick={disconnectSync} disabled={syncBusy}>Turn off</button>
+            </div>
+          {:else}
+            <div class="field"><label for="su">Project URL</label><input id="su" class="input mono" bind:value={sf.url} placeholder="https://xxxx.supabase.co" /></div>
+            <div class="field"><label for="sk">Anon (public) key</label><input id="sk" class="input mono" bind:value={sf.anonKey} /></div>
+            <div class="grid-2">
+              <div class="field"><label for="se">Store login email</label><input id="se" class="input" bind:value={sf.email} autocomplete="off" /></div>
+              <div class="field"><label for="spw">Password</label><input id="spw" class="input" type="password" bind:value={sf.password} autocomplete="new-password" /></div>
+            </div>
+            <div><button class="btn btn-primary" type="submit" disabled={syncBusy || !sf.url || !sf.anonKey || !sf.email || !sf.password}>Connect</button></div>
+          {/if}
+        </form>
         <div class="card card-body stack">
           <h2>Backup</h2>
           <p class="muted">Makes a copy of the whole database in your Documents folder under "Liquor POS / backups". Copy that folder to a USB stick or Google Drive regularly.</p>
@@ -102,4 +183,7 @@
 <style>
   .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; max-width: 1100px; }
   .small { font-size: 12px; word-break: break-all; }
+  .between { justify-content: space-between; }
+  .kv { display: flex; justify-content: space-between; }
+  .err { color: var(--danger); font-size: 13px; word-break: break-word; }
 </style>
