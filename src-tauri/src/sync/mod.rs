@@ -157,7 +157,8 @@ fn run_once(app: &AppHandle) {
     };
 
     sync.update(|s| s.syncing = true);
-    let result = sync_pass(&db, &cfg);
+    let version = app.package_info().version.to_string();
+    let result = sync_pass(&db, &cfg, &version);
     let pending = pending_count(&db.lock());
     sync.update(|s| {
         s.syncing = false;
@@ -184,12 +185,47 @@ fn local_now(conn: &Connection) -> String {
     conn.query_row("SELECT datetime('now', 'localtime')", [], |r| r.get(0)).unwrap_or_default()
 }
 
-fn sync_pass(db: &Db, cfg: &Config) -> Result<(), String> {
+fn sync_pass(db: &Db, cfg: &Config, version: &str) -> Result<(), String> {
     let client = Client::new(&cfg.url, &cfg.anon)?;
     let tokens = ensure_tokens(db, &client, cfg)?;
-    push(db, &client, &tokens, cfg)?;
+    let pushed = push(db, &client, &tokens, cfg);
+    // Heartbeat goes out even if the push failed, so the owner can see a till
+    // that is online but stuck. Its own failure never blocks the sync.
+    let _ = heartbeat(db, &client, &tokens, cfg, version, pushed.is_ok());
+    pushed?;
     pull_products(db, &client, &tokens, cfg)?;
     Ok(())
+}
+
+/// One row per till in `devices`: last seen, queue length, last receipt, app version.
+fn heartbeat(db: &Db, client: &Client, tokens: &Tokens, cfg: &Config, version: &str, push_ok: bool) -> Result<(), String> {
+    let (now, pending, last_sale, last_user): (String, i64, i64, Option<String>) = {
+        let conn = db.lock();
+        let now = local_now(&conn);
+        let pending = pending_count(&conn);
+        let last_sale: i64 = conn.query_row("SELECT COALESCE(MAX(id), 0) FROM sales", [], |r| r.get(0)).unwrap_or(0);
+        let last_user: Option<String> = conn
+            .query_row(
+                "SELECT u.username FROM audit_log a JOIN users u ON u.id = a.user_id WHERE a.action = 'login' ORDER BY a.id DESC LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .optional()
+            .ok()
+            .flatten();
+        (now, pending, last_sale, last_user)
+    };
+    let row = serde_json::json!({
+        "device_id": cfg.device_id,
+        "store_id": tokens.user_id,
+        "last_seen": now,
+        "pending": pending,
+        "push_ok": push_ok,
+        "last_sale_local_id": last_sale,
+        "last_user": last_user,
+        "app_version": version,
+    });
+    client.upsert_on(&tokens.access, "devices", "device_id", &[row])
 }
 
 fn ensure_tokens(db: &Db, client: &Client, cfg: &Config) -> Result<Tokens, String> {

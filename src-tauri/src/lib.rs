@@ -38,6 +38,14 @@ pub fn run() {
             std::fs::create_dir_all(&dir)?;
             let conn = db::open(&dir.join("liquorpos.db"))?;
             seed_default_owner(&conn)?;
+            commands::audit::log(
+                &conn,
+                None,
+                "app_start",
+                "app",
+                None,
+                serde_json::json!({ "version": app.package_info().version.to_string() }),
+            )?;
             app.manage(db::Db(Mutex::new(conn)));
             app.manage(Session::default());
             sync::start(app.handle().clone());

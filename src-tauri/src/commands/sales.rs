@@ -3,6 +3,7 @@ use tauri::State;
 
 use crate::commands::audit;
 use crate::commands::auth::{require_owner, require_user, Session};
+use crate::sync::Sync;
 use crate::db::Db;
 use crate::error::{bad, AppResult};
 use crate::models::{Sale, SaleDetail, SaleInput, SaleItem};
@@ -57,7 +58,7 @@ fn load_sale(conn: &Connection, id: i64) -> AppResult<SaleDetail> {
 /// Complete a sale. Everything (sale, lines, stock deduction, movement log,
 /// audit) happens in one transaction: either all of it is saved or none of it.
 #[tauri::command]
-pub fn create_sale(db: State<Db>, session: State<Session>, input: SaleInput) -> AppResult<SaleDetail> {
+pub fn create_sale(db: State<Db>, session: State<Session>, sync: State<Sync>, input: SaleInput) -> AppResult<SaleDetail> {
     let user = require_user(&session)?;
     if input.items.is_empty() {
         return Err(bad("The cart is empty"));
@@ -175,6 +176,8 @@ pub fn create_sale(db: State<Db>, session: State<Session>, input: SaleInput) -> 
 
     let detail = load_sale(&tx, sale_id)?;
     tx.commit()?;
+    drop(conn);
+    sync.kick();
     Ok(detail)
 }
 
@@ -209,7 +212,7 @@ pub fn list_sales(
 /// Owner-only. Marks the sale voided and puts every item back into stock.
 /// The original sale row is kept so the audit trail stays complete.
 #[tauri::command]
-pub fn void_sale(db: State<Db>, session: State<Session>, sale_id: i64, reason: String) -> AppResult<SaleDetail> {
+pub fn void_sale(db: State<Db>, session: State<Session>, sync: State<Sync>, sale_id: i64, reason: String) -> AppResult<SaleDetail> {
     let owner = require_owner(&session)?;
     let reason = reason.trim().to_string();
     if reason.is_empty() {
@@ -251,5 +254,7 @@ pub fn void_sale(db: State<Db>, session: State<Session>, sale_id: i64, reason: S
     audit::log(&tx, Some(owner.id), "void", "sale", Some(sale_id), serde_json::json!({ "reason": reason }))?;
     let detail = load_sale(&tx, sale_id)?;
     tx.commit()?;
+    drop(conn);
+    sync.kick();
     Ok(detail)
 }

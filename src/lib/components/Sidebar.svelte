@@ -1,19 +1,8 @@
 <script lang="ts">
   import { api } from "../api";
-  import { session, toasts, type Screen } from "../stores/session.svelte";
+  import { session, syncState, toasts, type Screen } from "../stores/session.svelte";
   import { cart } from "../stores/cart.svelte";
-  import { onMount } from "svelte";
-  import type { SyncStatus } from "../types";
-
-  let sync = $state<SyncStatus | null>(null);
-  onMount(() => {
-    const poll = async () => {
-      try { sync = await api.syncStatus(); } catch { /* ignore */ }
-    };
-    poll();
-    const t = setInterval(poll, 10_000);
-    return () => clearInterval(t);
-  });
+  const sync = $derived(syncState.status);
   const syncLabel = $derived.by(() => {
     if (!sync || !sync.configured) return null;
     if (sync.syncing) return { dot: "busy", text: "Syncing…" };

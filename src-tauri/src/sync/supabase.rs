@@ -104,9 +104,13 @@ impl Client {
 
     /// Upsert rows by `uid`. Rows in one call must have distinct uids.
     pub fn upsert(&self, token: &str, table: &str, rows: &[Value]) -> Result<(), String> {
+        self.upsert_on(token, table, "uid", rows)
+    }
+
+    pub fn upsert_on(&self, token: &str, table: &str, key: &str, rows: &[Value]) -> Result<(), String> {
         let res = self
             .http
-            .post(format!("{}/rest/v1/{table}?on_conflict=uid", self.url))
+            .post(format!("{}/rest/v1/{table}?on_conflict={key}", self.url))
             .header("apikey", &self.anon)
             .bearer_auth(token)
             .header("Prefer", "resolution=merge-duplicates,return=minimal")

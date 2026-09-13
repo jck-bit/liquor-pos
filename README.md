@@ -117,6 +117,17 @@ The till never waits on the network. Triggers in SQLite (`src-tauri/migrations/0
 
 Each row has a globally unique `uid`, so several tills can push into one store later without id clashes.
 
+### Can a cashier hide sales from the cloud?
+
+Not through the app. Sync is automatic, runs in the background, and pushes within seconds of every sale, void and stock change. Only an owner can turn it off, and doing so is written to the audit log. What a cashier *can* do is unplug the network. Then:
+
+- The till shows a red bar, "Sales are not reaching the cloud", after an hour of unsynced changes.
+- The `devices` table in Supabase shows each till's `last_seen`, how many changes are `pending`, the last receipt number and who last logged in. A till that goes quiet during trading hours is visible from anywhere.
+- Receipt numbers are sequential, so a gap or a thin day stands out in the `sales` table.
+- The moment the network is back, the queue drains. Nothing is lost unless the database file itself is deleted, and even then everything already synced is safe in the cloud.
+
+What no software can catch is a sale that is never rung up. The answer to that is the stock count: Stock > Adjust / count against physical shelves, and the difference is logged.
+
 ### Looking at the data
 
 Open **Table Editor** in Supabase, or query the `daily_sales` view. Anything that reads Supabase (a web dashboard, a Google Sheet, a phone app) can be built on top later without touching the till.

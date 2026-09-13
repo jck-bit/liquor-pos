@@ -134,3 +134,20 @@ select store_id, date(created_at) as day, count(*) as sales_count,
 from public.sales
 where status = 'completed'
 group by store_id, date(created_at);
+
+-- One row per till. Updated on every sync pass, whether or not the push succeeded,
+-- so the owner can see a till that is online but stuck, or one that went dark.
+create table if not exists public.devices (
+  device_id           text primary key,
+  store_id            uuid not null default auth.uid(),
+  last_seen           timestamp,
+  pending             bigint not null default 0,
+  push_ok             boolean,
+  last_sale_local_id  bigint,
+  last_user           text,
+  app_version         text
+);
+alter table public.devices enable row level security;
+drop policy if exists store_rw on public.devices;
+create policy store_rw on public.devices for all to authenticated
+  using (store_id = auth.uid()) with check (store_id = auth.uid());

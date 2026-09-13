@@ -3,6 +3,7 @@ use tauri::State;
 
 use crate::commands::audit;
 use crate::commands::auth::{require_owner, require_user, Session};
+use crate::sync::Sync;
 use crate::db::Db;
 use crate::error::{bad, AppResult};
 use crate::models::{Product, ProductInput};
@@ -190,7 +191,7 @@ pub struct ImportResult {
 /// their stock set to the sheet's count; new rows are created with opening stock.
 /// One transaction: either the whole sheet goes in or none of it.
 #[tauri::command]
-pub fn import_products(db: State<Db>, session: State<Session>, rows: Vec<ImportRow>) -> AppResult<ImportResult> {
+pub fn import_products(db: State<Db>, session: State<Session>, sync: State<Sync>, rows: Vec<ImportRow>) -> AppResult<ImportResult> {
     let owner = require_owner(&session)?;
     let mut conn = db.lock();
     let tx = conn.transaction()?;
@@ -271,5 +272,7 @@ pub fn import_products(db: State<Db>, session: State<Session>, rows: Vec<ImportR
         serde_json::json!({ "created": result.created, "updated": result.updated, "skipped": result.skipped }),
     )?;
     tx.commit()?;
+    drop(conn);
+    sync.kick();
     Ok(result)
 }

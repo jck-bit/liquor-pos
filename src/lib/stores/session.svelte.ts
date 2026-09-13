@@ -1,4 +1,4 @@
-import type { User } from "../types";
+import type { SyncStatus, User } from "../types";
 
 export type Screen = "sell" | "products" | "stock" | "sales" | "reports" | "audit" | "users" | "settings";
 
@@ -15,6 +15,20 @@ class Session {
   }
 }
 export const session = new Session();
+
+class SyncState {
+  status = $state<SyncStatus | null>(null);
+
+  /** True when the cloud has not accepted anything for over an hour while changes are waiting. */
+  get stale() {
+    const s = this.status;
+    if (!s?.configured || s.pending === 0) return false;
+    if (!s.lastOk) return true;
+    const last = new Date(s.lastOk.replace(" ", "T")).getTime();
+    return Date.now() - last > 60 * 60 * 1000;
+  }
+}
+export const syncState = new SyncState();
 
 export type Toast = { id: number; kind: "info" | "success" | "error"; text: string };
 

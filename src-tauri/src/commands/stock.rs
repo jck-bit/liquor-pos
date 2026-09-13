@@ -3,6 +3,7 @@ use tauri::State;
 
 use crate::commands::audit;
 use crate::commands::auth::{require_owner, require_user, Session};
+use crate::sync::Sync;
 use crate::commands::products::{row_to_product, PRODUCT_COLS};
 use crate::db::Db;
 use crate::error::{bad, AppResult};
@@ -14,6 +15,7 @@ use crate::models::{Product, ReceiveLine, StockMovement};
 pub fn receive_stock(
     db: State<Db>,
     session: State<Session>,
+    sync: State<Sync>,
     lines: Vec<ReceiveLine>,
     note: Option<String>,
 ) -> AppResult<()> {
@@ -51,6 +53,8 @@ pub fn receive_stock(
         serde_json::json!({ "lines": lines.len(), "units": total_units, "note": note }),
     )?;
     tx.commit()?;
+    drop(conn);
+    sync.kick();
     Ok(())
 }
 
@@ -59,6 +63,7 @@ pub fn receive_stock(
 pub fn adjust_stock(
     db: State<Db>,
     session: State<Session>,
+    sync: State<Sync>,
     product_id: i64,
     qty_delta: i64,
     reason: String,
@@ -95,6 +100,8 @@ pub fn adjust_stock(
     let sql = format!("SELECT {PRODUCT_COLS} FROM products WHERE id = ?1");
     let product = tx.query_row(&sql, params![product_id], row_to_product)?;
     tx.commit()?;
+    drop(conn);
+    sync.kick();
     Ok(product)
 }
 
