@@ -9,6 +9,9 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# Always push with the GitHub CLI's active login, never an older account cached in the keychain.
+gitpush() { git -c credential.helper= -c 'credential.helper=!gh auth git-credential' push -q "$@"; }
+
 export PATH="$HOME/.cargo/bin:/opt/homebrew/opt/llvm/bin:$PATH"
 KEY_FILE="${TAURI_SIGNING_PRIVATE_KEY_PATH:-$HOME/.tauri/liquorpos.key}"
 [ -f "$KEY_FILE" ] || { echo "Signing key not found at $KEY_FILE" >&2; exit 1; }
@@ -26,7 +29,7 @@ for (const f of ["package.json", "src-tauri/tauri.conf.json"]) {
 }' "$NEW"
   git add package.json src-tauri/tauri.conf.json
   git commit -q -m "Release v$NEW" || true
-  git push -q origin HEAD
+  gitpush origin HEAD
 fi
 
 VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
@@ -61,7 +64,7 @@ process.stdout.write(JSON.stringify({
 
 echo "==> Publishing release $TAG on $REPO"
 git tag -f "$TAG" >/dev/null
-git push -q origin "$TAG" --force
+gitpush origin "$TAG" --force
 if gh release view "$TAG" >/dev/null 2>&1; then
   gh release upload "$TAG" "$EXE" "$SIG" "$OUT/latest.json" --clobber
 else
