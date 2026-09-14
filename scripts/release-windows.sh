@@ -45,7 +45,9 @@ echo "==> Building Liquor POS $VERSION for Windows"
 npm run tauri build -- --runner cargo-xwin --target x86_64-pc-windows-msvc --bundles nsis
 
 BUNDLE_DIR="src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis"
-EXE=$(ls "$BUNDLE_DIR"/*-setup.exe | head -1)
+# Pick the installer for this exact version; older builds stay in the same folder.
+EXE=$(ls "$BUNDLE_DIR"/*_"${VERSION}"_*-setup.exe 2>/dev/null | head -1)
+[ -n "$EXE" ] || { echo "No installer for version $VERSION in $BUNDLE_DIR" >&2; exit 1; }
 SIG="$EXE.sig"
 [ -f "$SIG" ] || { echo "Missing signature $SIG (is bundle.createUpdaterArtifacts true?)" >&2; exit 1; }
 EXE_NAME=$(basename "$EXE")
