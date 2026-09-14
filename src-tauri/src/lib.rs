@@ -2,47 +2,12 @@ mod commands;
 mod db;
 mod error;
 mod models;
+mod shops;
 mod sync;
 
-use std::sync::Mutex;
-
-use rusqlite::params;
 use tauri::Manager;
 
 use commands::auth::Session;
-
-/// First run only: create the owner account so the store can log in.
-fn seed_default_owner(conn: &rusqlite::Connection) -> error::AppResult<()> {
-    let count: i64 = conn.query_row("SELECT COUNT(*) FROM users", [], |r| r.get(0))?;
-    if count == 0 {
-        let hash = commands::auth::hash_pin("1234")?;
-        conn.execute(
-            "INSERT INTO users (username, pin_hash, role) VALUES ('admin', ?1, 'owner')",
-            params![hash],
-        )?;
-    }
-    conn.execute(
-        "INSERT OR IGNORE INTO settings (key, value) VALUES ('device_id', lower(hex(randomblob(8))))",
-        [],
-    )?;
-    conn.execute(
-        "INSERT OR IGNORE INTO settings (key, value) VALUES ('device_name', ?1)",
-        params![computer_name().unwrap_or_else(|| "This computer".into())],
-    )?;
-    Ok(())
-}
-
-/// Default name shown in the Till column on other computers. Owners can rename it in Settings.
-#[cfg(target_os = "macos")]
-fn computer_name() -> Option<String> {
-    let out = std::process::Command::new("scutil").args(["--get", "ComputerName"]).output().ok()?;
-    Some(String::from_utf8_lossy(&out.stdout).trim().to_string()).filter(|n| !n.is_empty())
-}
-
-#[cfg(not(target_os = "macos"))]
-fn computer_name() -> Option<String> {
-    std::env::var("COMPUTERNAME").ok().filter(|n| !n.trim().is_empty())
-}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -52,8 +17,11 @@ pub fn run() {
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&dir)?;
-            let conn = db::open(&dir.join("liquorpos.db"))?;
-            seed_default_owner(&conn)?;
+            // Open the shop that was used last. A till has exactly one.
+            let shops = shops::Shops::load(&dir)?;
+            let shop = shops.current();
+            let conn = db::open_shop(&shops.path_of(&shop))?;
+            shops.refresh(&shop.id, &conn)?;
             commands::audit::log(
                 &conn,
                 None,
@@ -62,7 +30,8 @@ pub fn run() {
                 None,
                 serde_json::json!({ "version": app.package_info().version.to_string() }),
             )?;
-            app.manage(db::Db(Mutex::new(conn)));
+            app.manage(db::Db::new(conn));
+            app.manage(shops);
             app.manage(Session::default());
             sync::start(app.handle().clone());
             Ok(())
@@ -103,6 +72,9 @@ pub fn run() {
             commands::sync::disable_sync,
             commands::sync::sync_now,
             commands::sync::sync_status,
+            commands::shops::list_shops,
+            commands::shops::open_shop,
+            commands::shops::add_shop,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Liquor POS");

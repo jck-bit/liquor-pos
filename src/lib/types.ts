@@ -167,3 +167,13 @@ export interface ImportResult {
   updated: number;
   skipped: number;
 }
+
+export interface ShopInfo {
+  id: string;
+  name: string;
+  connected: boolean;
+}
+export interface ShopList {
+  shops: ShopInfo[];
+  current: string;
+}

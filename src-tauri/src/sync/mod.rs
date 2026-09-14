@@ -10,7 +10,7 @@ pub mod supabase;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::mpsc::{channel, Receiver, Sender};
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
 
 use rusqlite::{params, Connection, OptionalExtension};
@@ -47,11 +47,29 @@ impl Sync {
     pub fn kick(&self) {
         let _ = self.tx.lock().unwrap_or_else(|e| e.into_inner()).send(());
     }
+    /// A different shop was opened: its status starts empty until its first pass.
+    pub fn reset(&self) {
+        self.update(|s| *s = SyncStatus::default());
+    }
     pub fn status(&self) -> SyncStatus {
         self.status.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
     fn update(&self, f: impl FnOnce(&mut SyncStatus)) {
         f(&mut self.status.lock().unwrap_or_else(|e| e.into_inner()));
+    }
+}
+
+/// The shop database as it was when a sync pass started. Every access checks that
+/// the computer has not switched shops since, so one shop's cloud data can never
+/// be written into another shop.
+pub struct PassDb<'a> {
+    db: &'a Db,
+    generation: u64,
+}
+
+impl<'a> PassDb<'a> {
+    pub fn lock(&self) -> Result<MutexGuard<'a, Connection>, String> {
+        self.db.lock_if(self.generation)
     }
 }
 
@@ -138,11 +156,12 @@ pub fn store_tokens(conn: &Connection, t: &Tokens) -> rusqlite::Result<()> {
 // ---------- the sync pass ----------
 
 fn run_once(app: &AppHandle) {
-    let db = app.state::<Db>();
+    let db = app.state::<Db>().inner();
     let sync = app.state::<Sync>();
+    let pass = PassDb { db, generation: db.generation() };
 
     let cfg = {
-        let conn = db.lock();
+        let Ok(conn) = pass.lock() else { return };
         let cfg = load_config(&conn);
         let pending = pending_count(&conn);
         sync.update(|s| {
@@ -158,8 +177,13 @@ fn run_once(app: &AppHandle) {
 
     sync.update(|s| s.syncing = true);
     let version = app.package_info().version.to_string();
-    let result = sync_pass(&db, &cfg, &version);
-    let pending = pending_count(&db.lock());
+    let result = sync_pass(&pass, &cfg, &version);
+    if db.generation() != pass.generation {
+        // The computer switched shops mid-pass; the new shop's status starts fresh.
+        sync.update(|s| s.syncing = false);
+        return;
+    }
+    let Ok((pending, now)) = pass.lock().map(|conn| (pending_count(&conn), local_now(&conn))) else { return };
     sync.update(|s| {
         s.syncing = false;
         s.pending = pending;
@@ -167,7 +191,7 @@ fn run_once(app: &AppHandle) {
             Ok(()) => {
                 s.connected = true;
                 s.last_error = None;
-                s.last_ok = Some(local_now(&db.lock()));
+                s.last_ok = Some(now.clone());
             }
             Err(e) => {
                 s.connected = false;
@@ -175,9 +199,10 @@ fn run_once(app: &AppHandle) {
             }
         }
     });
-    if let Ok(()) = result {
-        let conn = db.lock();
-        let _ = set_setting(&conn, "sync_last_ok", &local_now(&conn));
+    if result.is_ok() {
+        if let Ok(conn) = pass.lock() {
+            let _ = set_setting(&conn, "sync_last_ok", &now);
+        }
     }
 }
 
@@ -185,7 +210,7 @@ fn local_now(conn: &Connection) -> String {
     conn.query_row("SELECT datetime('now', 'localtime')", [], |r| r.get(0)).unwrap_or_default()
 }
 
-fn sync_pass(db: &Db, cfg: &Config, version: &str) -> Result<(), String> {
+fn sync_pass(db: &PassDb, cfg: &Config, version: &str) -> Result<(), String> {
     let client = Client::new(&cfg.url, &cfg.anon)?;
     let tokens = ensure_tokens(db, &client, cfg)?;
     let pushed = push(db, &client, &tokens, cfg);
@@ -198,9 +223,9 @@ fn sync_pass(db: &Db, cfg: &Config, version: &str) -> Result<(), String> {
 }
 
 /// One row per till in `devices`: last seen, queue length, last receipt, app version.
-fn heartbeat(db: &Db, client: &Client, tokens: &Tokens, cfg: &Config, version: &str, push_ok: bool) -> Result<(), String> {
+fn heartbeat(db: &PassDb, client: &Client, tokens: &Tokens, cfg: &Config, version: &str, push_ok: bool) -> Result<(), String> {
     let (now, pending, last_sale, last_user, name): (String, i64, i64, Option<String>, Option<String>) = {
-        let conn = db.lock();
+        let conn = db.lock()?;
         let now = local_now(&conn);
         let pending = pending_count(&conn);
         let last_sale: i64 = conn
@@ -231,26 +256,26 @@ fn heartbeat(db: &Db, client: &Client, tokens: &Tokens, cfg: &Config, version: &
     client.upsert_on(&tokens.access, "devices", "device_id", &[row])
 }
 
-fn ensure_tokens(db: &Db, client: &Client, cfg: &Config) -> Result<Tokens, String> {
+fn ensure_tokens(db: &PassDb, client: &Client, cfg: &Config) -> Result<Tokens, String> {
     if let Some(t) = &cfg.tokens {
         if !supabase::expiring_soon(t.expires_at) {
             return Ok(t.clone());
         }
         if let Ok(fresh) = client.refresh(&t.refresh) {
-            store_tokens(&db.lock(), &fresh).map_err(|e| e.to_string())?;
+            store_tokens(&*db.lock()?, &fresh).map_err(|e| e.to_string())?;
             return Ok(fresh);
         }
     }
     let fresh = client.password_login(&cfg.email, &cfg.password)?;
-    store_tokens(&db.lock(), &fresh).map_err(|e| e.to_string())?;
+    store_tokens(&*db.lock()?, &fresh).map_err(|e| e.to_string())?;
     Ok(fresh)
 }
 
-fn push(db: &Db, client: &Client, tokens: &Tokens, cfg: &Config) -> Result<(), String> {
+fn push(db: &PassDb, client: &Client, tokens: &Tokens, cfg: &Config) -> Result<(), String> {
     loop {
         // Read a batch, then release the lock before any network call.
         let rows: Vec<(i64, String, String, String)> = {
-            let conn = db.lock();
+            let conn = db.lock()?;
             let mut stmt = conn
                 .prepare_cached("SELECT id, table_name, uid, payload FROM sync_outbox ORDER BY id LIMIT ?1")
                 .map_err(|e| e.to_string())?;
@@ -295,7 +320,7 @@ fn push(db: &Db, client: &Client, tokens: &Tokens, cfg: &Config) -> Result<(), S
         }
 
         let max_id = rows.iter().map(|r| r.0).max().unwrap_or(0);
-        db.lock()
+        db.lock()?
             .execute("DELETE FROM sync_outbox WHERE id <= ?1", params![max_id])
             .map_err(|e| e.to_string())?;
     }

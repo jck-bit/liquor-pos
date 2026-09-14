@@ -14,8 +14,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::Value;
 
 use super::supabase::{Client, Tokens};
-use super::{set_setting, setting, urlencode};
-use crate::db::Db;
+use super::{set_setting, setting, urlencode, PassDb};
 
 const PAGE: usize = 1000;
 const EPOCH: &str = "1970-01-01T00:00:00Z";
@@ -44,7 +43,7 @@ pub struct Applied {
     pub touched: BTreeSet<i64>,
 }
 
-pub fn pull_all(db: &Db, client: &Client, tokens: &Tokens, device_id: &str) -> R<()> {
+pub fn pull_all(db: &PassDb, client: &Client, tokens: &Tokens, device_id: &str) -> R<()> {
     pull_devices(db, client, tokens)?;
     for table in TABLES {
         pull_table(db, client, tokens, device_id, table)?;
@@ -54,8 +53,8 @@ pub fn pull_all(db: &Db, client: &Client, tokens: &Tokens, device_id: &str) -> R
 
 /// First pull after upgrading: rebuild every product's stock once, so it follows
 /// the shared history from here on.
-fn rebuild_once(db: &Db) -> R<()> {
-    let mut conn = db.lock();
+fn rebuild_once(db: &PassDb) -> R<()> {
+    let mut conn = db.lock()?;
     if setting(&conn, "stock_rebuilt_v2").is_some() {
         return Ok(());
     }
@@ -72,12 +71,12 @@ fn rebuild_once(db: &Db) -> R<()> {
     tx.commit().map_err(err)
 }
 
-fn pull_devices(db: &Db, client: &Client, tokens: &Tokens) -> R<()> {
+fn pull_devices(db: &PassDb, client: &Client, tokens: &Tokens) -> R<()> {
     let rows = client.select(
         &tokens.access,
         &format!("devices?select=device_id,name,last_seen&store_id=eq.{}", tokens.user_id),
     )?;
-    let conn = db.lock();
+    let conn = db.lock()?;
     let mut stmt = conn
         .prepare_cached(
             "INSERT INTO devices (device_id, name, last_seen) VALUES (?1, ?2, ?3)
@@ -92,12 +91,12 @@ fn pull_devices(db: &Db, client: &Client, tokens: &Tokens) -> R<()> {
     Ok(())
 }
 
-fn pull_table(db: &Db, client: &Client, tokens: &Tokens, device_id: &str, table: &str) -> R<()> {
+fn pull_table(db: &PassDb, client: &Client, tokens: &Tokens, device_id: &str, table: &str) -> R<()> {
     let key = format!("pull_cursor:{table}");
     // Start two minutes before the cursor: a push that was still committing
     // during the last read can carry an earlier synced_at than rows already seen.
     let lower = {
-        let conn = db.lock();
+        let conn = db.lock()?;
         setting(&conn, &key)
             .and_then(|c| {
                 conn.query_row("SELECT strftime('%Y-%m-%dT%H:%M:%fZ', ?1, '-2 minutes')", params![c], |r| {
@@ -123,7 +122,7 @@ fn pull_table(db: &Db, client: &Client, tokens: &Tokens, device_id: &str, table:
             break;
         }
         {
-            let mut conn = db.lock();
+            let mut conn = db.lock()?;
             let tx = conn.transaction().map_err(err)?;
             set_setting(&tx, "sync_pulling", "1").map_err(err)?;
             let applied = apply(&tx, table, &page)?;

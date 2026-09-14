@@ -7,6 +7,7 @@ use crate::commands::audit;
 use crate::commands::auth::{require_owner, Session};
 use crate::db::Db;
 use crate::error::{bad, AppResult};
+use crate::shops::{slug, Shops};
 
 const EDITABLE_SETTINGS: &[&str] =
     &["store_name", "receipt_footer", "allow_negative_stock", "store_phone", "store_address", "device_name"];
@@ -25,8 +26,18 @@ pub fn get_settings(db: State<Db>) -> AppResult<HashMap<String, String>> {
 }
 
 #[tauri::command]
-pub fn update_settings(db: State<Db>, session: State<Session>, values: HashMap<String, String>) -> AppResult<()> {
+pub fn update_settings(
+    db: State<Db>,
+    shops: State<Shops>,
+    session: State<Session>,
+    values: HashMap<String, String>,
+) -> AppResult<()> {
     let owner = require_owner(&session)?;
+    let shop = shops.current();
+    // The store name is also the shop's name on the login screen, so it must be unique on this computer.
+    if let Some(name) = values.get("store_name") {
+        shops.check_name(&shop.id, name)?;
+    }
     let mut conn = db.lock();
     let tx = conn.transaction()?;
     for (key, value) in &values {
@@ -40,25 +51,26 @@ pub fn update_settings(db: State<Db>, session: State<Session>, values: HashMap<S
     }
     audit::log(&tx, Some(owner.id), "update", "settings", None, serde_json::json!(values))?;
     tx.commit()?;
+    shops.refresh(&shop.id, &conn)?;
     Ok(())
 }
 
-/// Consistent snapshot of the database into Documents/Liquor POS/backups.
+/// Consistent snapshot of the open shop's database into Documents/Liquor POS/backups.
 /// VACUUM INTO is safe while the app is running, even in WAL mode.
 #[tauri::command]
-pub fn backup_database(app: AppHandle, db: State<Db>, session: State<Session>) -> AppResult<String> {
+pub fn backup_database(app: AppHandle, db: State<Db>, shops: State<Shops>, session: State<Session>) -> AppResult<String> {
     let owner = require_owner(&session)?;
     let dir = app.path().document_dir()?.join("Liquor POS").join("backups");
     std::fs::create_dir_all(&dir)?;
     let conn = db.lock();
     let stamp: String = conn.query_row("SELECT strftime('%Y%m%d-%H%M%S', 'now', 'localtime')", [], |r| r.get(0))?;
-    let path = dir.join(format!("liquorpos-{stamp}.db"));
+    let path = dir.join(format!("liquorpos-{}-{stamp}.db", slug(&shops.current().name)));
     conn.execute("VACUUM INTO ?1", params![path.to_string_lossy()])?;
     audit::log(&conn, Some(owner.id), "backup", "database", None, serde_json::json!({ "path": path.to_string_lossy() }))?;
     Ok(path.to_string_lossy().into_owned())
 }
 
 #[tauri::command]
-pub fn database_path(app: AppHandle) -> AppResult<String> {
-    Ok(app.path().app_data_dir()?.join("liquorpos.db").to_string_lossy().into_owned())
+pub fn database_path(shops: State<Shops>) -> AppResult<String> {
+    Ok(shops.path_of(&shops.current()).to_string_lossy().into_owned())
 }

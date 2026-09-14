@@ -39,6 +39,7 @@ src-tauri/
   migrations/001_init.sql   schema (add 004_*.sql for future changes, register in db.rs)
   migrations/002_sync.sql   sync queue table and triggers
   migrations/003_store_sync.sql  store-wide sync: counted levels, origin of each row
+  src/shops.rs          shops on this computer: one database file per shop, shops.json
   src/sync/             background cloud sync: push (mod.rs), pull and stock rebuild (pull.rs), Supabase client
   src/db.rs             connection, pragmas, migrations
   src/models.rs         structs shared with the frontend (serialised camelCase)
@@ -116,6 +117,19 @@ The till never waits on the network. Triggers in SQLite (`src-tauri/migrations/0
 3. **Authentication > Users > Add user**: create a user for the store, e.g. `till@yourstore.co.ke` with a strong password. Untick "send confirmation email" or confirm it. This account *is* the store: every row it pushes is tagged with its user id and nobody else can read it.
 4. **Project Settings > API**: copy the Project URL and the `anon` public key.
 5. In the app, log in as owner, **Settings > Cloud sync**, paste the URL, anon key, store email and password, click **Connect**. The app verifies the login before saving.
+
+### Several shops on one computer
+
+Each shop, for example Kimbo and Vintage, is completely separate: its own sales, stock, users, PINs, settings and its own Supabase project. A shop's computer holds only that shop.
+
+An owner's computer can hold several shops. Each shop there has its own database file, listed in `shops.json` in the app data folder.
+
+- **Login screen.** On a computer with more than one shop, a shop picker appears above the username. A computer with one shop, like a till, shows no picker and looks exactly as before.
+- **Switching.** Log out, or click Switch shop in the sidebar, then pick the other shop. Switching closes one shop's database and opens the other's, so nothing is ever shown together.
+- **Adding a shop.** Settings, Shops, Add shop. It opens with an empty database; log in with `admin` and PIN `1234`, change the PIN, then connect that shop's own Supabase.
+- **Protection.** A shop that already holds data from one Supabase store cannot be connected to a different one, and two shops on one computer cannot share a Supabase store. Either mistake would mix two shops, so the app refuses with an explanation.
+
+Never connect an existing shop to another shop's Supabase to "look at" it. Add the other shop instead.
 
 ### One store, several computers
 

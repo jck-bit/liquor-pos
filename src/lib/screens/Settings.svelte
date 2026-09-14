@@ -2,6 +2,30 @@
   import { onMount } from "svelte";
   import { api } from "../api";
   import { session, toasts } from "../stores/session.svelte";
+  import { cart } from "../stores/cart.svelte";
+
+  let newShop = $state("");
+  let addingShop = $state(false);
+
+  async function addShop(e: Event) {
+    e.preventDefault();
+    const name = newShop.trim();
+    if (!name || addingShop) return;
+    addingShop = true;
+    try {
+      session.shops = await api.addShop(name);
+      session.settings = await api.getSettings();
+      newShop = "";
+      cart.clear();
+      session.notice = `${name} is ready with its own empty database. Log in with admin and PIN 1234, change the PIN, then connect ${name}'s own Supabase in Settings.`;
+      session.user = null;
+      session.screen = "sell";
+    } catch (err) {
+      toasts.error(err);
+    } finally {
+      addingShop = false;
+    }
+  }
   import type { SyncStatus } from "../types";
   import { fmtDateTime } from "../format";
 
@@ -86,6 +110,7 @@
     try {
       await api.updateSettings({ ...f, allow_negative_stock: f.allow_negative_stock ? "1" : "0" });
       session.settings = await api.getSettings();
+      session.shops = await api.listShops();
       toasts.success("Settings saved");
     } catch (err) {
       toasts.error(err);
@@ -123,7 +148,11 @@
     <div class="cols">
       <form class="card card-body stack" onsubmit={save}>
         <h2>Store</h2>
-        <div class="field"><label for="sn">Store name</label><input id="sn" class="input" bind:value={f.store_name} required /></div>
+        <div class="field">
+          <label for="sn">Store name</label>
+          <input id="sn" class="input" bind:value={f.store_name} required />
+          <span class="muted">Printed on receipts{#if session.multiShop} and shown on the login screen{/if}.</span>
+        </div>
         <div class="field">
           <label for="dn">This computer's name</label>
           <input id="dn" class="input" bind:value={f.device_name} placeholder="e.g. Counter till" />
@@ -142,6 +171,28 @@
       </form>
 
       <div class="stack">
+        <div class="card card-body stack">
+          <h2>Shops on this computer</h2>
+          <p class="muted">Each shop has its own sales, stock, users and cloud connection. Nothing is shared between shops. Choose the shop on the login screen.</p>
+          {#if session.shops}
+            <ul class="shoplist">
+              {#each session.shops.shops as s (s.id)}
+                <li>
+                  <span class="strong">{s.name}</span>
+                  <span class="row">
+                    {#if s.id === session.shops.current}<span class="badge badge-green">Open now</span>{/if}
+                    <span class="badge {s.connected ? 'badge-gray' : 'badge-amber'}">{s.connected ? "Cloud connected" : "Not connected"}</span>
+                  </span>
+                </li>
+              {/each}
+            </ul>
+          {/if}
+          <form class="row" onsubmit={addShop}>
+            <input class="input" bind:value={newShop} placeholder="New shop name, e.g. Vintage" maxlength="40" />
+            <button class="btn" type="submit" disabled={!newShop.trim() || addingShop}>Add shop</button>
+          </form>
+          <p class="muted small">Adding a shop opens it straight away with an empty database. Connect it only to that shop's own Supabase.</p>
+        </div>
         <form class="card card-body stack" onsubmit={connectSync}>
           <div class="row between">
             <h2>Cloud sync (Supabase)</h2>
@@ -192,4 +243,8 @@
   .between { justify-content: space-between; }
   .kv { display: flex; justify-content: space-between; }
   .err { color: var(--danger); font-size: 13px; word-break: break-word; }
+  .strong { font-weight: 500; }
+  .shoplist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+  .shoplist li { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+  .shoplist li:last-child { border-bottom: 0; }
 </style>

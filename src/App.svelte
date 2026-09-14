@@ -28,6 +28,7 @@
   onMount(() => {
     (async () => {
       try {
+        session.shops = await api.listShops();
         session.settings = await api.getSettings();
         session.user = await api.currentUser();
       } catch (e) {

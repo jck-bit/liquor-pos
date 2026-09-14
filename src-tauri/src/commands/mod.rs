@@ -3,6 +3,7 @@ pub mod auth;
 pub mod products;
 pub mod reports;
 pub mod sales;
+pub mod shops;
 pub mod stock;
 pub mod sync;
 pub mod system;

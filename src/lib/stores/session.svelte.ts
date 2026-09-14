@@ -1,4 +1,4 @@
-import type { SyncStatus, User } from "../types";
+import type { ShopList, SyncStatus, User } from "../types";
 
 export type Screen = "sell" | "products" | "stock" | "sales" | "reports" | "audit" | "users" | "settings";
 
@@ -6,9 +6,16 @@ class Session {
   user = $state<User | null>(null);
   settings = $state<Record<string, string>>({});
   screen = $state<Screen>("sell");
+  shops = $state<ShopList | null>(null);
+  /** One-off message for the login screen, e.g. after adding a shop. */
+  notice = $state<string | null>(null);
 
   get isOwner() {
     return this.user?.role === "owner";
+  }
+  /** Only computers with more than one shop show the shop picker. */
+  get multiShop() {
+    return (this.shops?.shops.length ?? 0) > 1;
   }
   get storeName() {
     return this.settings.store_name || "Liquor POS";

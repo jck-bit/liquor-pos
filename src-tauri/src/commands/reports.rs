@@ -5,6 +5,7 @@ use tauri::{AppHandle, Manager, State};
 
 use crate::commands::auth::{require_owner, require_user, Session};
 use crate::db::Db;
+use crate::shops::{slug, Shops};
 use crate::error::{bad, AppResult};
 use crate::models::{DailyPoint, SalesSummary, StockValue, TopProduct};
 
@@ -143,6 +144,7 @@ fn money(cents: i64) -> String {
 pub fn export_sales_csv(
     app: AppHandle,
     db: State<Db>,
+    shops: State<Shops>,
     session: State<Session>,
     from: String,
     to: String,
@@ -151,7 +153,7 @@ pub fn export_sales_csv(
     check_range(&from, &to)?;
     let dir = app.path().document_dir()?.join("Liquor POS").join("exports");
     std::fs::create_dir_all(&dir)?;
-    let path = dir.join(format!("sales-{from}-to-{to}.csv"));
+    let path = dir.join(format!("sales-{}-{from}-to-{to}.csv", slug(&shops.current().name)));
 
     let conn = db.lock();
     let mut stmt = conn.prepare_cached(

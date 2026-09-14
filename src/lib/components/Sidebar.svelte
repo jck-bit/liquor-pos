@@ -61,7 +61,12 @@
       <div class="who">{session.user?.username}</div>
       <div class="role">{session.user?.role}</div>
     </div>
-    <button class="logout" onclick={logout}>Log out</button>
+    <div class="acts">
+      {#if session.multiShop}
+        <button class="logout" onclick={logout} title="Log out and choose another shop">Switch shop</button>
+      {/if}
+      <button class="logout" onclick={logout}>Log out</button>
+    </div>
   </div>
 </nav>
 
@@ -90,6 +95,7 @@
   .user { margin-top: auto; padding: 12px 8px 0; border-top: 1px solid #292524; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
   .who { color: #fff; font-weight: 500; }
   .role { font-size: 12px; text-transform: capitalize; }
+  .acts { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
   .logout { border: 0; background: transparent; color: inherit; cursor: pointer; font-size: 13px; padding: 4px 6px; border-radius: 4px; }
   .logout:hover { color: #fff; background: var(--sidebar-active); }
 </style>
