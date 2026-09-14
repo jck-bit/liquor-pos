@@ -18,6 +18,7 @@ impl Db {
 const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/001_init.sql"),
     include_str!("../migrations/002_sync.sql"),
+    include_str!("../migrations/003_store_sync.sql"),
 ];
 
 pub fn open(path: &Path) -> AppResult<Connection> {

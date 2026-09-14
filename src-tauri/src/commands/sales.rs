@@ -10,7 +10,10 @@ use crate::models::{Sale, SaleDetail, SaleInput, SaleItem};
 
 const SALE_SELECT: &str = "SELECT s.id, u.username, s.subtotal, s.discount, s.total, s.payment_method, s.mpesa_code,
         s.cash_tendered, s.change_given, s.status, s.void_reason,
-        (SELECT COALESCE(SUM(qty), 0) FROM sale_items WHERE sale_id = s.id), s.created_at
+        (SELECT COALESCE(SUM(qty), 0) FROM sale_items WHERE sale_id = s.id), s.created_at,
+        COALESCE(s.origin_no, s.id),
+        CASE WHEN s.origin_device IS NULL THEN (SELECT value FROM settings WHERE key = 'device_name')
+             ELSE COALESCE((SELECT name FROM devices WHERE device_id = s.origin_device), 'Another computer') END
      FROM sales s JOIN users u ON u.id = s.user_id";
 
 fn row_to_sale(r: &rusqlite::Row) -> rusqlite::Result<Sale> {
@@ -28,6 +31,8 @@ fn row_to_sale(r: &rusqlite::Row) -> rusqlite::Result<Sale> {
         void_reason: r.get(10)?,
         item_count: r.get(11)?,
         created_at: r.get(12)?,
+        receipt_no: r.get(13)?,
+        till: r.get(14)?,
     })
 }
 
@@ -129,11 +134,12 @@ pub fn create_sale(db: State<Db>, session: State<Session>, sync: State<Sync>, in
             if code.len() < 8 || !code.chars().all(|c| c.is_ascii_alphanumeric()) {
                 return Err(bad("Enter the M-Pesa transaction code (e.g. QGH7XK2M9P)"));
             }
+            // Includes sales received from the store's other computers.
             let used: Option<i64> = tx
-                .query_row("SELECT id FROM sales WHERE mpesa_code = ?1", params![code], |r| r.get(0))
+                .query_row("SELECT COALESCE(origin_no, id) FROM sales WHERE mpesa_code = ?1", params![code], |r| r.get(0))
                 .optional()?;
-            if let Some(sale_id) = used {
-                return Err(bad(format!("M-Pesa code {code} was already used on sale #{sale_id}")));
+            if let Some(receipt) = used {
+                return Err(bad(format!("M-Pesa code {code} was already used on receipt #{receipt:06}")));
             }
             (Some(code), None, None)
         }
@@ -202,7 +208,7 @@ pub fn list_sales(
     let sql = format!(
         "{SALE_SELECT} WHERE s.created_at >= ?1 AND s.created_at < date(?2, '+1 day')
            AND (?3 IS NULL OR s.payment_method = ?3)
-         ORDER BY s.id DESC LIMIT ?4"
+         ORDER BY s.created_at DESC, s.id DESC LIMIT ?4"
     );
     let mut stmt = conn.prepare_cached(&sql)?;
     let rows = stmt.query_map(params![from, to, payment_method, limit.unwrap_or(500)], row_to_sale)?;

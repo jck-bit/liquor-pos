@@ -56,7 +56,7 @@
     }
   }
 
-  let f = $state({ store_name: "", store_phone: "", store_address: "", receipt_footer: "", allow_negative_stock: false });
+  let f = $state({ store_name: "", device_name: "", store_phone: "", store_address: "", receipt_footer: "", allow_negative_stock: false });
   let dbPath = $state("");
   let lastBackup = $state("");
   let busy = $state(false);
@@ -66,6 +66,7 @@
     const s = session.settings;
     f = {
       store_name: s.store_name ?? "",
+      device_name: s.device_name ?? "",
       store_phone: s.store_phone ?? "",
       store_address: s.store_address ?? "",
       receipt_footer: s.receipt_footer ?? "",
@@ -123,6 +124,11 @@
       <form class="card card-body stack" onsubmit={save}>
         <h2>Store</h2>
         <div class="field"><label for="sn">Store name</label><input id="sn" class="input" bind:value={f.store_name} required /></div>
+        <div class="field">
+          <label for="dn">This computer's name</label>
+          <input id="dn" class="input" bind:value={f.device_name} placeholder="e.g. Counter till" />
+          <span class="muted">Shown in the Till column on the store's other computers.</span>
+        </div>
         <div class="grid-2">
           <div class="field"><label for="sp">Phone</label><input id="sp" class="input" bind:value={f.store_phone} /></div>
           <div class="field"><label for="sa">Address</label><input id="sa" class="input" bind:value={f.store_address} /></div>

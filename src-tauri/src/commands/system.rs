@@ -8,14 +8,17 @@ use crate::commands::auth::{require_owner, Session};
 use crate::db::Db;
 use crate::error::{bad, AppResult};
 
-const EDITABLE_SETTINGS: &[&str] = &["store_name", "receipt_footer", "allow_negative_stock", "store_phone", "store_address"];
+const EDITABLE_SETTINGS: &[&str] =
+    &["store_name", "receipt_footer", "allow_negative_stock", "store_phone", "store_address", "device_name"];
 
 /// Settings are public (needed for the login screen title and receipts).
 #[tauri::command]
 pub fn get_settings(db: State<Db>) -> AppResult<HashMap<String, String>> {
     let conn = db.lock();
     let mut stmt = conn.prepare_cached(
-        "SELECT key, value FROM settings WHERE key NOT IN ('sync_password', 'sync_access_token', 'sync_refresh_token', 'sync_pulling')",
+        "SELECT key, value FROM settings
+         WHERE key NOT IN ('sync_password', 'sync_access_token', 'sync_refresh_token', 'sync_pulling')
+           AND key NOT LIKE 'pull_cursor:%'",
     )?;
     let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
     Ok(rows.collect::<Result<_, _>>()?)

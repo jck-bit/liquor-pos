@@ -52,7 +52,7 @@
           {#each entries as e (e.id)}
             <tr>
               <td class="muted nowrap">{fmtDateTime(e.createdAt)}</td>
-              <td>{e.user ?? "—"}</td>
+              <td>{e.user ?? "—"}{#if e.till} <span class="muted">on {e.till}</span>{/if}</td>
               <td><span class="badge {actionClass[e.action] ?? 'badge-amber'}">{e.action.replace("_", " ")}</span></td>
               <td class="nowrap">{e.entity}{e.entityId ? ` #${e.entityId}` : ""}</td>
               <td class="details">{describe(e)}</td>

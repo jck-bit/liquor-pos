@@ -19,7 +19,7 @@ pub fn receive_stock(
     lines: Vec<ReceiveLine>,
     note: Option<String>,
 ) -> AppResult<()> {
-    let user = require_user(&session)?;
+    let user = require_owner(&session)?;
     if lines.is_empty() {
         return Err(bad("Add at least one product"));
     }
@@ -68,26 +68,38 @@ pub fn adjust_stock(
     qty_delta: i64,
     reason: String,
     note: Option<String>,
+    counted: Option<i64>,
 ) -> AppResult<Product> {
     let owner = require_owner(&session)?;
     if !matches!(reason.as_str(), "adjustment" | "damage" | "count") {
         return Err(bad("Invalid reason"));
-    }
-    if qty_delta == 0 {
-        return Err(bad("Change cannot be zero"));
     }
     let mut conn = db.lock();
     let tx = conn.transaction()?;
     let before: i64 = tx
         .query_row("SELECT stock_qty FROM products WHERE id = ?1", params![product_id], |r| r.get(0))
         .map_err(|_| bad("Product not found"))?;
+    // A count records the level itself, not the difference, so every computer in
+    // the store lands on this number even if they showed different figures before.
+    let (qty_delta, count_to) = if reason == "count" {
+        let level = counted.ok_or_else(|| bad("Enter the counted quantity"))?;
+        if level < 0 {
+            return Err(bad("A count cannot be negative"));
+        }
+        (level - before, Some(level))
+    } else {
+        if qty_delta == 0 {
+            return Err(bad("Change cannot be zero"));
+        }
+        (qty_delta, None)
+    };
     tx.execute(
         "UPDATE products SET stock_qty = stock_qty + ?1, updated_at = datetime('now', 'localtime') WHERE id = ?2",
         params![qty_delta, product_id],
     )?;
     tx.execute(
-        "INSERT INTO stock_movements (product_id, qty_delta, reason, note, user_id) VALUES (?1, ?2, ?3, ?4, ?5)",
-        params![product_id, qty_delta, reason, note, owner.id],
+        "INSERT INTO stock_movements (product_id, qty_delta, reason, note, user_id, count_to) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![product_id, qty_delta, reason, note, owner.id, count_to],
     )?;
     audit::log(
         &tx,
@@ -115,12 +127,14 @@ pub fn list_stock_movements(
     require_user(&session)?;
     let conn = db.lock();
     let mut stmt = conn.prepare_cached(
-        "SELECT m.id, m.product_id, p.name, m.qty_delta, m.reason, m.ref_sale_id, m.note, u.username, m.created_at
+        "SELECT m.id, m.product_id, p.name, m.qty_delta, m.reason, m.ref_sale_id, m.note, u.username, m.created_at,
+                (SELECT COALESCE(s.origin_no, s.id) FROM sales s WHERE s.id = m.ref_sale_id),
+                CASE WHEN m.origin_device IS NULL THEN NULL ELSE COALESCE((SELECT name FROM devices WHERE device_id = m.origin_device), 'Another computer') END
          FROM stock_movements m
          JOIN products p ON p.id = m.product_id
          JOIN users u ON u.id = m.user_id
          WHERE (?1 IS NULL OR m.product_id = ?1)
-         ORDER BY m.id DESC LIMIT ?2",
+         ORDER BY m.created_at DESC, m.id DESC LIMIT ?2",
     )?;
     let rows = stmt.query_map(params![product_id, limit.unwrap_or(200)], |r| {
         Ok(StockMovement {
@@ -133,6 +147,8 @@ pub fn list_stock_movements(
             note: r.get(6)?,
             user: r.get(7)?,
             created_at: r.get(8)?,
+            ref_receipt_no: r.get(9)?,
+            till: r.get(10)?,
         })
     })?;
     Ok(rows.collect::<Result<_, _>>()?)

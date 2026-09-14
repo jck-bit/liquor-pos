@@ -1,12 +1,14 @@
 //! Offline-first cloud sync.
 //!
-//! SQLite is the source of truth. Triggers (migrations/002_sync.sql) copy every
+//! SQLite is the source of truth on each computer. Triggers copy every
 //! insert/update into `sync_outbox`; a background thread pushes that queue to
-//! Supabase whenever it can, then pulls product edits made in the cloud.
+//! Supabase whenever it can, then pulls what the store's other computers wrote
+//! (see `pull`).
 
+pub mod pull;
 pub mod supabase;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Mutex;
 use std::time::Duration;
@@ -100,7 +102,6 @@ struct Config {
     password: String,
     tokens: Option<Tokens>,
     device_id: String,
-    last_pull: String,
 }
 
 fn load_config(conn: &Connection) -> Option<Config> {
@@ -124,7 +125,6 @@ fn load_config(conn: &Connection) -> Option<Config> {
         password,
         tokens,
         device_id: setting(conn, "device_id").unwrap_or_else(|| "unknown".into()),
-        last_pull: setting(conn, "sync_last_pull").unwrap_or_else(|| "1970-01-01 00:00:00".into()),
     })
 }
 
@@ -193,17 +193,19 @@ fn sync_pass(db: &Db, cfg: &Config, version: &str) -> Result<(), String> {
     // that is online but stuck. Its own failure never blocks the sync.
     let _ = heartbeat(db, &client, &tokens, cfg, version, pushed.is_ok());
     pushed?;
-    pull_products(db, &client, &tokens, cfg)?;
+    pull::pull_all(db, &client, &tokens, &cfg.device_id)?;
     Ok(())
 }
 
 /// One row per till in `devices`: last seen, queue length, last receipt, app version.
 fn heartbeat(db: &Db, client: &Client, tokens: &Tokens, cfg: &Config, version: &str, push_ok: bool) -> Result<(), String> {
-    let (now, pending, last_sale, last_user): (String, i64, i64, Option<String>) = {
+    let (now, pending, last_sale, last_user, name): (String, i64, i64, Option<String>, Option<String>) = {
         let conn = db.lock();
         let now = local_now(&conn);
         let pending = pending_count(&conn);
-        let last_sale: i64 = conn.query_row("SELECT COALESCE(MAX(id), 0) FROM sales", [], |r| r.get(0)).unwrap_or(0);
+        let last_sale: i64 = conn
+            .query_row("SELECT COALESCE(MAX(id), 0) FROM sales WHERE origin_device IS NULL", [], |r| r.get(0))
+            .unwrap_or(0);
         let last_user: Option<String> = conn
             .query_row(
                 "SELECT u.username FROM audit_log a JOIN users u ON u.id = a.user_id WHERE a.action = 'login' ORDER BY a.id DESC LIMIT 1",
@@ -213,7 +215,7 @@ fn heartbeat(db: &Db, client: &Client, tokens: &Tokens, cfg: &Config, version: &
             .optional()
             .ok()
             .flatten();
-        (now, pending, last_sale, last_user)
+        (now, pending, last_sale, last_user, setting(&conn, "device_name"))
     };
     let row = serde_json::json!({
         "device_id": cfg.device_id,
@@ -224,6 +226,7 @@ fn heartbeat(db: &Db, client: &Client, tokens: &Tokens, cfg: &Config, version: &
         "last_sale_local_id": last_sale,
         "last_user": last_user,
         "app_version": version,
+        "name": name,
     });
     client.upsert_on(&tokens.access, "devices", "device_id", &[row])
 }
@@ -266,13 +269,27 @@ fn push(db: &Db, client: &Client, tokens: &Tokens, cfg: &Config) -> Result<(), S
             let mut v: Value = serde_json::from_str(payload).map_err(|e| format!("Bad outbox payload: {e}"))?;
             if let Value::Object(map) = &mut v {
                 map.insert("store_id".into(), Value::String(tokens.user_id.clone()));
-                map.insert("device_id".into(), Value::String(cfg.device_id.clone()));
+                // Rows received from another computer keep that computer as their origin.
+                if map.get("device_id").is_none_or(Value::is_null) {
+                    map.insert("device_id".into(), Value::String(cfg.device_id.clone()));
+                }
             }
             by_table.entry(table.as_str()).or_default().insert(uid.clone(), v);
         }
         for table in PUSH_ORDER {
             if let Some(items) = by_table.get(table) {
-                let batch: Vec<Value> = items.values().cloned().collect();
+                let mut batch: Vec<Value> = items.values().cloned().collect();
+                // PostgREST needs every object in one upsert to carry the same keys;
+                // rows queued by an older version can lack newer columns.
+                let keys: BTreeSet<String> =
+                    batch.iter().filter_map(Value::as_object).flat_map(|m| m.keys().cloned()).collect();
+                for row in batch.iter_mut() {
+                    if let Value::Object(m) = row {
+                        for k in &keys {
+                            m.entry(k.clone()).or_insert(Value::Null);
+                        }
+                    }
+                }
                 client.upsert(&tokens.access, table, &batch)?;
             }
         }
@@ -284,68 +301,6 @@ fn push(db: &Db, client: &Client, tokens: &Tokens, cfg: &Config) -> Result<(), S
     }
 }
 
-/// Bring down product edits made in the cloud (name, prices, barcode, category,
-/// reorder level, active). Stock quantity is owned by the till and never pulled
-/// for products the till already knows.
-fn pull_products(db: &Db, client: &Client, tokens: &Tokens, cfg: &Config) -> Result<(), String> {
-    let query = format!(
-        "products?select=uid,barcode,name,category,cost_price,sell_price,stock_qty,reorder_level,active,updated_at\
-         &store_id=eq.{}&updated_at=gt.{}&order=updated_at.asc&limit=500",
-        tokens.user_id,
-        urlencode(&cfg.last_pull)
-    );
-    let rows = client.select(&tokens.access, &query)?;
-    if rows.is_empty() {
-        return Ok(());
-    }
-
-    let mut conn = db.lock();
-    let tx = conn.transaction().map_err(|e| e.to_string())?;
-    set_setting(&tx, "sync_pulling", "1").map_err(|e| e.to_string())?;
-    let mut newest = cfg.last_pull.clone();
-    let result: Result<(), String> = (|| {
-        for r in &rows {
-            let s = |k: &str| r.get(k).and_then(Value::as_str).map(str::to_string);
-            let n = |k: &str| r.get(k).and_then(Value::as_i64).unwrap_or(0);
-            let uid = s("uid").ok_or("product without uid")?;
-            let updated_at = s("updated_at").unwrap_or_default().replace('T', " ");
-            let updated_at = updated_at.split('.').next().unwrap_or(&updated_at).to_string();
-            let active = r.get("active").and_then(Value::as_bool).unwrap_or(true) as i64;
-            let changed = tx
-                .execute(
-                    "UPDATE products SET barcode = ?1, name = ?2, category = ?3, cost_price = ?4, sell_price = ?5,
-                        reorder_level = ?6, active = ?7, updated_at = ?8
-                     WHERE uid = ?9 AND updated_at < ?8",
-                    params![s("barcode"), s("name"), s("category"), n("cost_price"), n("sell_price"), n("reorder_level"), active, updated_at, uid],
-                )
-                .map_err(|e| e.to_string())?;
-            if changed == 0 {
-                let exists: bool = tx
-                    .query_row("SELECT 1 FROM products WHERE uid = ?1", params![uid], |_| Ok(true))
-                    .optional()
-                    .map_err(|e| e.to_string())?
-                    .unwrap_or(false);
-                if !exists {
-                    tx.execute(
-                        "INSERT INTO products (uid, barcode, name, category, cost_price, sell_price, stock_qty, reorder_level, active, updated_at)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-                        params![uid, s("barcode"), s("name"), s("category"), n("cost_price"), n("sell_price"), n("stock_qty"), n("reorder_level"), active, updated_at],
-                    )
-                    .map_err(|e| e.to_string())?;
-                }
-            }
-            if updated_at > newest {
-                newest = updated_at;
-            }
-        }
-        Ok(())
-    })();
-    set_setting(&tx, "sync_pulling", "0").map_err(|e| e.to_string())?;
-    result?;
-    set_setting(&tx, "sync_last_pull", &newest).map_err(|e| e.to_string())?;
-    tx.commit().map_err(|e| e.to_string())
-}
-
-fn urlencode(s: &str) -> String {
+pub(crate) fn urlencode(s: &str) -> String {
     s.replace(' ', "%20").replace(':', "%3A").replace('+', "%2B")
 }

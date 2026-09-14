@@ -33,9 +33,10 @@ pub fn list_audit(
     require_owner(&session)?;
     let conn = db.lock();
     let mut stmt = conn.prepare_cached(
-        "SELECT a.id, u.username, a.action, a.entity, a.entity_id, a.details, a.created_at
+        "SELECT a.id, u.username, a.action, a.entity, a.entity_id, a.details, a.created_at,
+                CASE WHEN a.origin_device IS NULL THEN NULL ELSE COALESCE((SELECT name FROM devices WHERE device_id = a.origin_device), 'Another computer') END
          FROM audit_log a LEFT JOIN users u ON u.id = a.user_id
-         ORDER BY a.id DESC LIMIT ?1 OFFSET ?2",
+         ORDER BY a.created_at DESC, a.id DESC LIMIT ?1 OFFSET ?2",
     )?;
     let rows = stmt.query_map(params![limit.unwrap_or(200), offset.unwrap_or(0)], |r| {
         Ok(AuditEntry {
@@ -46,6 +47,7 @@ pub fn list_audit(
             entity_id: r.get(4)?,
             details: r.get(5)?,
             created_at: r.get(6)?,
+            till: r.get(7)?,
         })
     })?;
     Ok(rows.collect::<Result<_, _>>()?)

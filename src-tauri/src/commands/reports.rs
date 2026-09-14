@@ -155,7 +155,7 @@ pub fn export_sales_csv(
 
     let conn = db.lock();
     let mut stmt = conn.prepare_cached(
-        "SELECT s.id, s.created_at, u.username, s.status, s.payment_method, COALESCE(s.mpesa_code, ''),
+        "SELECT COALESCE(s.origin_no, s.id), s.created_at, u.username, s.status, s.payment_method, COALESCE(s.mpesa_code, ''),
                 si.product_name, si.qty, si.unit_price, si.line_total, si.unit_cost, s.discount, s.total
          FROM sales s JOIN users u ON u.id = s.user_id JOIN sale_items si ON si.sale_id = s.id
          WHERE s.created_at >= ?1 AND s.created_at < date(?2, '+1 day')

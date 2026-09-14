@@ -15,7 +15,8 @@
     {#if st.store_phone}<div>Tel: {st.store_phone}</div>{/if}
   </div>
   <div class="rule"></div>
-  <div class="kv"><span>Receipt</span><span>{receiptNo(s.id)}</span></div>
+  <div class="kv"><span>Receipt</span><span>{receiptNo(s.receiptNo)}</span></div>
+  {#if s.till}<div class="kv"><span>Till</span><span>{s.till}</span></div>{/if}
   <div class="kv"><span>Date</span><span>{fmtDateTime(s.createdAt)}</span></div>
   <div class="kv"><span>Served by</span><span>{s.cashier}</span></div>
   <div class="rule"></div>

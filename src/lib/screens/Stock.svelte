@@ -3,11 +3,12 @@
   import { api } from "../api";
   import type { Product, StockMovement } from "../types";
   import { session, toasts } from "../stores/session.svelte";
-  import { fmtDateTime, fromCents, money, toCents } from "../format";
+  import { fmtDateTime, fromCents, money, receiptNo, toCents } from "../format";
   import ProductPicker from "../components/ProductPicker.svelte";
 
   type Tab = "receive" | "adjust" | "movements" | "low";
-  let tab = $state<Tab>("receive");
+  // Only owners change stock; cashiers can look at movements and low stock.
+  let tab = $state<Tab>(session.isOwner ? "receive" : "movements");
 
   // Receive
   type Line = { product: Product; qty: number; cost: string };
@@ -56,7 +57,8 @@
     if (!adjProduct || savingAdj) return;
     savingAdj = true;
     try {
-      adjProduct = await api.adjustStock(adjProduct.id, adjDelta, adjMode, adjNote);
+      const counted = adjMode === "count" ? parseInt(adjValue) : undefined;
+      adjProduct = await api.adjustStock(adjProduct.id, adjDelta, adjMode, adjNote, counted);
       toasts.success(`${adjProduct.name} now at ${adjProduct.stockQty}`);
       adjValue = "";
       adjNote = "";
@@ -79,7 +81,7 @@
       toasts.error(e);
     }
   }
-  onMount(() => loadTab("receive"));
+  onMount(() => loadTab(tab));
 
   const reasonLabel: Record<string, string> = { sale: "Sale", void: "Void", purchase: "Delivery", adjustment: "Adjustment", damage: "Damage", count: "Stock count" };
 </script>
@@ -88,8 +90,10 @@
   <div class="page-header">
     <h1>Stock</h1>
     <div class="tabs">
-      <button class:on={tab === "receive"} onclick={() => loadTab("receive")}>Receive delivery</button>
-      {#if session.isOwner}<button class:on={tab === "adjust"} onclick={() => loadTab("adjust")}>Adjust / count</button>{/if}
+      {#if session.isOwner}
+        <button class:on={tab === "receive"} onclick={() => loadTab("receive")}>Receive delivery</button>
+        <button class:on={tab === "adjust"} onclick={() => loadTab("adjust")}>Adjust / count</button>
+      {/if}
       <button class:on={tab === "movements"} onclick={() => loadTab("movements")}>Movements</button>
       <button class:on={tab === "low"} onclick={() => loadTab("low")}>Low stock</button>
     </div>
@@ -155,7 +159,7 @@
             </div>
             <div class="row between">
               <span class="muted">Stock will go from {adjProduct.stockQty} to <strong>{adjProduct.stockQty + adjDelta}</strong> ({adjDelta >= 0 ? "+" : ""}{adjDelta})</span>
-              <button class="btn btn-primary" disabled={adjDelta === 0 || !adjNote.trim() || savingAdj} onclick={saveAdjust}>Apply</button>
+              <button class="btn btn-primary" disabled={(adjMode === "count" ? !Number.isFinite(parseInt(adjValue)) : adjDelta === 0) || !adjNote.trim() || savingAdj} onclick={saveAdjust}>Apply</button>
             </div>
           </div>
         {/if}
@@ -172,8 +176,8 @@
                 <td class="strong">{m.productName}</td>
                 <td><span class="badge {m.qtyDelta < 0 ? 'badge-gray' : 'badge-green'}">{reasonLabel[m.reason] ?? m.reason}</span></td>
                 <td class="num" class:neg={m.qtyDelta < 0}>{m.qtyDelta > 0 ? "+" : ""}{m.qtyDelta}</td>
-                <td class="muted">{m.refSaleId ? `Sale #${m.refSaleId}` : m.note ?? ""}</td>
-                <td>{m.user}</td>
+                <td class="muted">{m.refReceiptNo ? `Receipt ${receiptNo(m.refReceiptNo)}` : m.note ?? ""}</td>
+                <td>{m.user}{#if m.till} <span class="muted">on {m.till}</span>{/if}</td>
               </tr>
             {:else}
               <tr><td colspan="6" class="empty">No stock movements yet.</td></tr>

@@ -69,6 +69,10 @@ pub struct Sale {
     pub void_reason: Option<String>,
     pub item_count: i64,
     pub created_at: String,
+    /// Receipt number on the computer that made the sale.
+    pub receipt_no: i64,
+    /// Name of the computer that made the sale.
+    pub till: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -109,6 +113,9 @@ pub struct StockMovement {
     pub note: Option<String>,
     pub user: String,
     pub created_at: String,
+    pub ref_receipt_no: Option<i64>,
+    /// Set when the movement was made on another computer.
+    pub till: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -121,6 +128,8 @@ pub struct AuditEntry {
     pub entity_id: Option<i64>,
     pub details: String,
     pub created_at: String,
+    /// Set when the entry was made on another computer.
+    pub till: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

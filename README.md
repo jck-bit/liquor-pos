@@ -36,9 +36,10 @@ src/                    Svelte frontend
   lib/screens/          Login, Sell, Products, Stock, Sales, Reports, Audit, Users, Settings
 supabase/schema.sql     cloud tables + RLS, run once in the Supabase SQL editor
 src-tauri/
-  migrations/001_init.sql   schema (add 003_*.sql for future changes, register in db.rs)
+  migrations/001_init.sql   schema (add 004_*.sql for future changes, register in db.rs)
   migrations/002_sync.sql   sync queue table and triggers
-  src/sync/             background cloud sync worker and Supabase client
+  migrations/003_store_sync.sql  store-wide sync: counted levels, origin of each row
+  src/sync/             background cloud sync: push (mod.rs), pull and stock rebuild (pull.rs), Supabase client
   src/db.rs             connection, pragmas, migrations
   src/models.rs         structs shared with the frontend (serialised camelCase)
   src/commands/         one file per area: auth, users, products, stock, sales, reports, audit, system, sync
@@ -106,7 +107,7 @@ The Windows installer includes a bootstrapper for Microsoft WebView2, which Wind
 
 ## Cloud sync with Supabase
 
-The till never waits on the network. Triggers in SQLite (`src-tauri/migrations/002_sync.sql`) copy every insert and update into a `sync_outbox` queue in the same transaction as the change. A background thread (`src-tauri/src/sync/`) pushes the queue every 30 seconds, or immediately when you click "Sync now", and then pulls product edits made in the cloud. If the internet is down the queue simply grows and the sidebar shows "Offline · N waiting".
+The till never waits on the network. Triggers in SQLite (`src-tauri/migrations/002_sync.sql`) copy every insert and update into a `sync_outbox` queue in the same transaction as the change. A background thread (`src-tauri/src/sync/`) pushes the queue every 30 seconds, or immediately when you click "Sync now", and then pulls everything the store's other computers have uploaded. If the internet is down the queue simply grows and the sidebar shows "Offline · N waiting".
 
 ### One-time setup
 
@@ -116,14 +117,24 @@ The till never waits on the network. Triggers in SQLite (`src-tauri/migrations/0
 4. **Project Settings > API**: copy the Project URL and the `anon` public key.
 5. In the app, log in as owner, **Settings > Cloud sync**, paste the URL, anon key, store email and password, click **Connect**. The app verifies the login before saving.
 
-### What syncs
+### One store, several computers
 
-| Direction | Data |
-|---|---|
-| Till → cloud | products, sales, sale items, stock movements, audit log, users (never PINs) |
-| Cloud → till | product name, barcode, category, prices, reorder level, active flag. New products created in the cloud appear on the till. Stock quantity is owned by the till. |
+Every computer connected with the same store login shares one history. Within a minute, all of them show:
 
-Each row has a globally unique `uid`, so several tills can push into one store later without id clashes.
+- every sale and void, with its receipt number and the computer it was rung up on (the Till column)
+- every stock change: deliveries, counts, damage, sales and voids
+- every user account and the full audit log
+- product and price edits
+
+**How stock stays the same everywhere.** Stock is never copied between computers as a number. Each computer rebuilds it from the shared list of stock movements: the most recent count sets the level at the moment it was taken, and every sale, delivery, void or damage after that moves it from there. A count done on the office computer at 10:30pm becomes the till's starting stock, and only sales made after 10:30pm reduce it. Keep computer clocks correct; Windows and macOS do this automatically.
+
+**Who can change stock.** Only owners can receive deliveries, count, record damage, edit products or void sales, on any computer. Cashiers sell and can view sales, reports, movements and low stock.
+
+**Users.** Accounts appear on every computer, but a PIN stays on the computer where it was set. To let a cashier log in on another computer, an owner opens Users there and sets their PIN. Accounts with the same username, such as each computer's `admin`, are the same person.
+
+**Current stock in Supabase.** Query the `product_stock` view. `products.stock_qty` only holds the last figure some computer uploaded.
+
+**Upgrading from 0.1.** Run `supabase/schema.sql` again in the SQL Editor before or right after installing 0.2 on the first computer. Until you do, the app shows "Supabase needs the latest setup" and keeps every change queued locally.
 
 ### Can a cashier hide sales from the cloud?
 

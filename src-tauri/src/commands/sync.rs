@@ -33,7 +33,7 @@ pub fn configure_sync(
         set_setting(&conn, "supabase_anon_key", anon_key.trim())?;
         set_setting(&conn, "sync_email", email.trim())?;
         set_setting(&conn, "sync_password", &password)?;
-        set_setting(&conn, "sync_last_pull", "1970-01-01 00:00:00")?;
+        conn.execute("DELETE FROM settings WHERE key LIKE 'pull_cursor:%' OR key = 'stock_rebuilt_v2'", [])?;
         store_tokens(&conn, &tokens)?;
         audit::log(&conn, Some(owner.id), "configure", "sync", None, serde_json::json!({ "url": url, "email": email.trim() }))?;
     }

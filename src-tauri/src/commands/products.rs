@@ -230,17 +230,15 @@ pub fn import_products(db: State<Db>, session: State<Session>, sync: State<Sync>
                     params![category, row.sell_price, row.cost_price, barcode, id],
                 )?;
                 if let Some(target) = row.stock_qty {
-                    let delta = target - current_stock;
-                    if delta != 0 {
-                        tx.execute(
-                            "UPDATE products SET stock_qty = ?1 WHERE id = ?2",
-                            params![target, id],
-                        )?;
-                        tx.execute(
-                            "INSERT INTO stock_movements (product_id, qty_delta, reason, note, user_id) VALUES (?1, ?2, 'count', 'Set by import', ?3)",
-                            params![id, delta, owner.id],
-                        )?;
-                    }
+                    // Recorded as a count even when the number is unchanged, so every
+                    // computer in the store lands on this level.
+                    let target = target.max(0);
+                    tx.execute("UPDATE products SET stock_qty = ?1 WHERE id = ?2", params![target, id])?;
+                    tx.execute(
+                        "INSERT INTO stock_movements (product_id, qty_delta, reason, note, user_id, count_to)
+                         VALUES (?1, ?2, 'count', 'Set by import', ?3, ?4)",
+                        params![id, target - current_stock, owner.id, target],
+                    )?;
                 }
                 result.updated += 1;
             }

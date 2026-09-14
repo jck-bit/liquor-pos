@@ -62,7 +62,7 @@
       discountText = "";
       lastSale = detail;
       receiptOpen = true;
-      toasts.success(`Sale ${receiptNo(detail.sale.id)} completed`);
+      toasts.success(`Sale ${receiptNo(detail.sale.receiptNo)} completed`);
     } catch (e) {
       toasts.error(e);
     } finally {

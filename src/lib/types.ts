@@ -53,6 +53,10 @@ export interface Sale {
   voidReason: string | null;
   itemCount: number;
   createdAt: string;
+  /** Receipt number on the computer that made the sale. */
+  receiptNo: number;
+  /** Name of the computer that made the sale. */
+  till: string | null;
 }
 
 export interface SaleItem {
@@ -87,6 +91,9 @@ export interface StockMovement {
   note: string | null;
   user: string;
   createdAt: string;
+  refReceiptNo: number | null;
+  /** Set when the movement was made on another computer. */
+  till: string | null;
 }
 
 export interface AuditEntry {
@@ -97,6 +104,8 @@ export interface AuditEntry {
   entityId: number | null;
   details: string;
   createdAt: string;
+  /** Set when the entry was made on another computer. */
+  till: string | null;
 }
 
 export interface SalesSummary {

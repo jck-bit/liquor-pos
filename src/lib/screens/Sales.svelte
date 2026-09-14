@@ -46,7 +46,7 @@
     voiding = true;
     try {
       detail = await api.voidSale(detail.sale.id, voidReason);
-      toasts.success(`Sale ${receiptNo(detail.sale.id)} voided, stock restored`);
+      toasts.success(`Sale ${receiptNo(detail.sale.receiptNo)} voided, stock restored`);
       await load();
     } catch (e) {
       toasts.error(e);
@@ -71,12 +71,13 @@
   <div class="page-body">
     <div class="card table-wrap">
       <table class="table">
-        <thead><tr><th>Receipt</th><th>When</th><th>Cashier</th><th class="num">Items</th><th>Payment</th><th>M-Pesa code</th><th class="num">Total</th><th></th></tr></thead>
+        <thead><tr><th>Receipt</th><th>When</th><th>Till</th><th>Cashier</th><th class="num">Items</th><th>Payment</th><th>M-Pesa code</th><th class="num">Total</th><th></th></tr></thead>
         <tbody>
           {#each sales as s (s.id)}
             <tr class="clickable" class:dim={s.status === "voided"} onclick={() => show(s)}>
-              <td class="mono">{receiptNo(s.id)}</td>
+              <td class="mono">{receiptNo(s.receiptNo)}</td>
               <td>{fmtDateTime(s.createdAt)}</td>
+              <td class="muted">{s.till ?? ""}</td>
               <td>{s.cashier}</td>
               <td class="num">{s.itemCount}</td>
               <td><span class="badge {s.paymentMethod === 'mpesa' ? 'badge-green' : 'badge-gray'}">{s.paymentMethod === "mpesa" ? "M-Pesa" : "Cash"}</span></td>
@@ -85,18 +86,18 @@
               <td>{#if s.status === "voided"}<span class="badge badge-red">Voided</span>{/if}</td>
             </tr>
           {:else}
-            <tr><td colspan="8" class="empty">No sales in this period.</td></tr>
+            <tr><td colspan="9" class="empty">No sales in this period.</td></tr>
           {/each}
         </tbody>
         {#if sales.length}
-          <tfoot><tr><td colspan="6" class="right muted">{sales.filter((s) => s.status === "completed").length} completed sales</td><td class="num strong">{money(total)}</td><td></td></tr></tfoot>
+          <tfoot><tr><td colspan="7" class="right muted">{sales.filter((s) => s.status === "completed").length} completed sales</td><td class="num strong">{money(total)}</td><td></td></tr></tfoot>
         {/if}
       </table>
     </div>
   </div>
 </div>
 
-<Modal title={detail ? `Receipt ${receiptNo(detail.sale.id)}` : ""} bind:open width={720}>
+<Modal title={detail ? `Receipt ${receiptNo(detail.sale.receiptNo)}` : ""} bind:open width={720}>
   {#if detail}
     <div class="detail">
       <Receipt {detail} />

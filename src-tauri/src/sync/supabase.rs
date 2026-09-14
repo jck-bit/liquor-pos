@@ -41,6 +41,12 @@ fn now() -> i64 {
 }
 
 fn body_error(status: reqwest::StatusCode, text: String) -> String {
+    // A table or column this version uses does not exist in Supabase yet.
+    if ["PGRST204", "PGRST205", "42703", "42P01"].iter().any(|code| text.contains(code)) {
+        return "Supabase needs the latest setup. In Supabase open SQL Editor, paste supabase/schema.sql and run it. \
+                Nothing is lost: changes wait on this computer until then."
+            .into();
+    }
     let short: String = text.chars().take(300).collect();
     format!("HTTP {status}: {short}")
 }

@@ -126,7 +126,7 @@ begin
 end $$;
 
 -- Handy view for a weekly summary per store.
-create or replace view public.daily_sales as
+create or replace view public.daily_sales with (security_invoker = true) as
 select store_id, date(created_at) as day, count(*) as sales_count,
        sum(total) as net_cents,
        sum(total) filter (where payment_method = 'cash') as cash_cents,
@@ -151,3 +151,54 @@ alter table public.devices enable row level security;
 drop policy if exists store_rw on public.devices;
 create policy store_rw on public.devices for all to authenticated
   using (store_id = auth.uid()) with check (store_id = auth.uid());
+
+-- ---------------------------------------------------------------------------
+-- v0.2: every computer in a store receives the others' sales, stock and users.
+-- Safe to run again.
+-- ---------------------------------------------------------------------------
+
+-- A stock count stores the counted level, so every computer lands on the same number.
+alter table public.stock_movements add column if not exists count_to bigint;
+
+-- Friendly computer name for the Till column.
+alter table public.devices add column if not exists name text;
+
+-- synced_at is set by the server on every write. Computers ask for rows newer
+-- than the last one they saw, which catches rows uploaded late by a computer
+-- that was offline.
+create or replace function public.touch_synced_at() returns trigger language plpgsql as $$
+begin
+  new.synced_at := now();
+  return new;
+end $$;
+
+do $$
+declare t text;
+begin
+  foreach t in array array['users','products','sales','sale_items','stock_movements','audit_log'] loop
+    execute format('alter table public.%I add column if not exists synced_at timestamptz not null default now()', t);
+    execute format('create index if not exists %I on public.%I (store_id, synced_at)', t || '_store_synced', t);
+    execute format('drop trigger if exists %I on public.%I', t || '_synced_at', t);
+    execute format('create trigger %I before insert or update on public.%I for each row execute function public.touch_synced_at()', t || '_synced_at', t);
+  end loop;
+end $$;
+
+create index if not exists movements_count on public.stock_movements (product_uid, created_at) where reason = 'count';
+
+-- Current stock per product, worked out the same way the app does: the latest
+-- count, plus everything that happened after it. Use this instead of
+-- products.stock_qty, which only shows the last figure a computer uploaded.
+create or replace view public.product_stock with (security_invoker = true) as
+select p.store_id, p.uid, p.name, p.category, p.sell_price, p.active,
+  coalesce(
+    (select c.count_to + coalesce((
+        select sum(m.qty_delta) from public.stock_movements m
+        where m.product_uid = p.uid and m.created_at > c.created_at
+          and not (m.reason = 'count' and m.count_to is not null)), 0)
+     from public.stock_movements c
+     where c.product_uid = p.uid and c.reason = 'count' and c.count_to is not null
+     order by c.created_at desc limit 1),
+    (select sum(m.qty_delta) from public.stock_movements m where m.product_uid = p.uid),
+    p.stock_qty
+  ) as stock
+from public.products p;

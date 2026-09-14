@@ -27,8 +27,9 @@ export const api = {
 
   // stock
   receiveStock: (lines: ReceiveLine[], note?: string) => invoke<void>("receive_stock", { lines, note: note || null }),
-  adjustStock: (productId: number, qtyDelta: number, reason: string, note?: string) =>
-    invoke<Product>("adjust_stock", { productId, qtyDelta, reason, note: note || null }),
+  /** For reason "count", pass the counted level; qtyDelta is ignored. */
+  adjustStock: (productId: number, qtyDelta: number, reason: string, note?: string, counted?: number) =>
+    invoke<Product>("adjust_stock", { productId, qtyDelta, reason, note: note || null, counted: counted ?? null }),
   listStockMovements: (productId?: number, limit = 200) =>
     invoke<StockMovement[]>("list_stock_movements", { productId: productId ?? null, limit }),
   lowStockProducts: () => invoke<Product[]>("low_stock_products"),
