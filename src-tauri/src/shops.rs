@@ -70,6 +70,8 @@ pub struct ShopInfo {
     pub id: String,
     pub name: String,
     pub connected: bool,
+    /// The logged-in owner's username and PIN are also an owner's in this shop.
+    pub unlocked: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -77,6 +79,8 @@ pub struct ShopInfo {
 pub struct ShopList {
     pub shops: Vec<ShopInfo>,
     pub current: String,
+    /// This computer holds more than one shop. The only thing known before logging in.
+    pub multi: bool,
 }
 
 pub struct Shops {
@@ -148,9 +152,10 @@ impl Shops {
             shops: reg
                 .shops
                 .iter()
-                .map(|s| ShopInfo { id: s.id.clone(), name: s.name.clone(), connected: s.connected })
+                .map(|s| ShopInfo { id: s.id.clone(), name: s.name.clone(), connected: s.connected, unlocked: false })
                 .collect(),
             current: reg.current.clone(),
+            multi: reg.shops.len() > 1,
         }
     }
 

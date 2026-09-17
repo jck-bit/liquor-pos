@@ -1,14 +1,13 @@
 <script lang="ts">
   import { api } from "../../api";
-  import type { PaymentMethod, ShopOverview, ShopSale, ShopSaleDetail } from "../../types";
+  import type { PaymentMethod, ShopSale, ShopSaleDetail } from "../../types";
   import { toasts } from "../../stores/session.svelte";
   import { fmtDateTime, int, money, receiptNo } from "../../format";
   import Modal from "../../components/Modal.svelte";
   import Receipt from "../../components/Receipt.svelte";
 
-  let { from, to, tick, shops }: { from: string; to: string; tick: number; shops: ShopOverview[] } = $props();
+  let { from, to, tick, shopId }: { from: string; to: string; tick: number; shopId: string } = $props();
 
-  let shopId = $state("");
   let method = $state<"" | PaymentMethod>("");
   let sales = $state<ShopSale[]>([]);
   let picked = $state<ShopSaleDetail | null>(null);
@@ -33,10 +32,6 @@
 </script>
 
 <div class="toolbar">
-  <select class="select pick" bind:value={shopId}>
-    <option value="">All shops</option>
-    {#each shops as s (s.id)}<option value={s.id}>{s.name}</option>{/each}
-  </select>
   <select class="select pick" bind:value={method}>
     <option value="">All payments</option>
     <option value="cash">Cash</option>

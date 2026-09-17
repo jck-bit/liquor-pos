@@ -7,13 +7,11 @@ class Session {
   settings = $state<Record<string, string>>({});
   screen = $state<Screen>("sell");
   shops = $state<ShopList | null>(null);
-  /** One-off message for the login screen, e.g. after adding a shop. */
-  notice = $state<string | null>(null);
 
   get isOwner() {
     return this.user?.role === "owner";
   }
-  /** Only computers with more than one shop show the shop picker. */
+  /** True only for an owner on a computer with several shops: cashiers are told about their own shop only. */
   get multiShop() {
     return (this.shops?.shops.length ?? 0) > 1;
   }

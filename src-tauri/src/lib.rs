@@ -73,7 +73,7 @@ pub fn run() {
             commands::sync::sync_now,
             commands::sync::sync_status,
             commands::shops::list_shops,
-            commands::shops::open_shop,
+            commands::shops::enter_shop,
             commands::shops::add_shop,
             commands::overview::all_shops_overview,
             commands::overview::all_shops_stock,

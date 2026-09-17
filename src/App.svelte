@@ -58,6 +58,7 @@
             {#if syncState.status?.lastError}<span class="err">({syncState.status.lastError})</span>{/if}
           </div>
         {/if}
+        {#key session.shops?.current}
         {#if session.screen === "sell"}
           <Sell />
         {:else if session.screen === "products"}
@@ -77,6 +78,7 @@
         {:else if session.screen === "settings"}
           <Settings />
         {/if}
+        {/key}
       </main>
     </div>
   {/if}

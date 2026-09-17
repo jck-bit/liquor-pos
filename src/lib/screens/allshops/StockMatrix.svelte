@@ -4,7 +4,7 @@
   import { toasts } from "../../stores/session.svelte";
   import { int, money } from "../../format";
 
-  let { tick }: { tick: number } = $props();
+  let { tick, shopId }: { tick: number; shopId: string } = $props();
 
   let matrix = $state<StockMatrix | null>(null);
   let query = $state("");
@@ -13,7 +13,7 @@
   // Reloads whenever the parent finishes a refresh.
   $effect(() => {
     void tick;
-    api.allShopsStock().then((m) => (matrix = m), (e) => toasts.error(e));
+    api.allShopsStock(shopId || undefined).then((m) => (matrix = m), (e) => toasts.error(e));
   });
 
   const rows = $derived.by(() => {
@@ -44,7 +44,7 @@
         <tr>
           <th>Product</th><th>Category</th>
           {#each matrix.shops as s (s.id)}<th class="num">{s.name}</th>{/each}
-          <th class="num">All shops</th>
+          {#if matrix.shops.length > 1}<th class="num">All shops</th>{/if}
         </tr>
       </thead>
       <tbody>
@@ -63,7 +63,7 @@
                 {:else}{c.qty}{/if}
               </td>
             {/each}
-            <td class="num strong">{int(r.total)}</td>
+            {#if matrix.shops.length > 1}<td class="num strong">{int(r.total)}</td>{/if}
           </tr>
         {:else}
           <tr><td colspan={matrix.shops.length + 3} class="empty">{query || lowOnly ? "No products match." : "No products yet."}</td></tr>
@@ -74,7 +74,7 @@
           <tr>
             <td colspan="2" class="right muted">Units shown</td>
             {#each totals as t, i (matrix.shops[i].id)}<td class="num strong">{int(t)}</td>{/each}
-            <td class="num strong">{int(totals.reduce((a, b) => a + b, 0))}</td>
+            {#if matrix.shops.length > 1}<td class="num strong">{int(totals.reduce((a, b) => a + b, 0))}</td>{/if}
           </tr>
         </tfoot>
       {/if}

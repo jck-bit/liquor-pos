@@ -2,6 +2,23 @@
   import { api } from "../api";
   import { session, syncState, toasts, type Screen } from "../stores/session.svelte";
   import { cart } from "../stores/cart.svelte";
+  import { enterShop } from "../shopSwitch";
+
+  let switching = $state(false);
+  let menuOpen = $state(false);
+
+  async function switchTo(id: string) {
+    if (switching) return;
+    switching = true;
+    try {
+      await enterShop(id);
+      menuOpen = false;
+    } catch (e) {
+      toasts.error(e);
+    } finally {
+      switching = false;
+    }
+  }
   const sync = $derived(syncState.status);
   const syncLabel = $derived.by(() => {
     if (!sync || !sync.configured) return null;
@@ -31,6 +48,8 @@
       cart.clear();
       session.user = null;
       session.screen = "sell";
+      menuOpen = false;
+      session.shops = await api.listShops();
     } catch (e) {
       toasts.error(e);
     }
@@ -58,14 +77,30 @@
       <span class="dot {syncLabel.dot}"></span>{syncLabel.text}
     </button>
   {/if}
+  {#if menuOpen && session.shops}
+    <div class="shopmenu" role="menu">
+      {#each session.shops.shops as s (s.id)}
+        <button
+          role="menuitem"
+          class:on={s.id === session.shops.current}
+          disabled={switching || !s.unlocked || s.id === session.shops.current}
+          title={s.unlocked ? "" : `Your login does not open ${s.name}. Sign in with its owner PIN.`}
+          onclick={() => switchTo(s.id)}
+        >
+          <span>{s.name}</span>
+          <span class="tag">{s.id === session.shops.current ? "open" : s.unlocked ? "" : "locked"}</span>
+        </button>
+      {/each}
+    </div>
+  {/if}
   <div class="user">
     <div>
       <div class="who">{session.user?.username}</div>
       <div class="role">{session.user?.role}</div>
     </div>
     <div class="acts">
-      {#if session.multiShop}
-        <button class="logout" onclick={logout} title="Log out and choose another shop">Switch shop</button>
+      {#if session.isOwner && session.multiShop}
+        <button class="logout" onclick={() => (menuOpen = !menuOpen)} aria-expanded={menuOpen}>Switch shop</button>
       {/if}
       <button class="logout" onclick={logout}>Log out</button>
     </div>
@@ -89,7 +124,9 @@
   li button.active { background: var(--sidebar-active); color: #fff; box-shadow: inset 3px 0 0 var(--accent); }
   .sync { margin-top: auto; border: 0; background: transparent; color: inherit; cursor: pointer; text-align: left; font-size: 12px; padding: 6px 8px; display: flex; align-items: center; gap: 8px; border-radius: 4px; }
   .sync:hover { background: var(--sidebar-active); }
-  .sync + .user { margin-top: 0; }
+  .sync + .user, .shopmenu + .user { margin-top: 0; }
+  .shopmenu { margin-top: auto; }
+  .sync + .shopmenu { margin-top: 8px; }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: #57534e; flex-shrink: 0; }
   .dot.ok { background: #22c55e; }
   .dot.busy { background: #f59e0b; }
@@ -97,6 +134,12 @@
   .user { margin-top: auto; padding: 12px 8px 0; border-top: 1px solid #292524; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
   .who { color: #fff; font-weight: 500; }
   .role { font-size: 12px; text-transform: capitalize; }
+  .shopmenu { display: flex; flex-direction: column; gap: 2px; padding: 6px; margin-bottom: 8px; background: var(--sidebar-active); border-radius: var(--radius); }
+  .shopmenu button { display: flex; justify-content: space-between; align-items: center; gap: 8px; border: 0; background: transparent; color: #e7e5e4; padding: 7px 8px; border-radius: 4px; cursor: pointer; text-align: left; font-weight: 500; }
+  .shopmenu button:hover:not(:disabled) { background: #3f3a36; color: #fff; }
+  .shopmenu button:disabled { cursor: default; opacity: 0.65; }
+  .shopmenu button.on { opacity: 1; color: #fff; }
+  .shopmenu .tag { font-size: 11px; font-weight: 400; color: var(--sidebar-ink); }
   .acts { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
   .logout { border: 0; background: transparent; color: inherit; cursor: pointer; font-size: 13px; padding: 4px 6px; border-radius: 4px; }
   .logout:hover { color: #fff; background: var(--sidebar-active); }

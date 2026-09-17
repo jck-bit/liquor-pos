@@ -33,13 +33,15 @@ src/                    Svelte frontend
   lib/format.ts         money and date helpers
   lib/stores/           session (user, settings, current screen), cart
   lib/components/       Modal, Toasts, Sidebar, ProductPicker (scanner input), DateRange, Receipt
-  lib/screens/          Login, Sell, Products, Stock, Sales, Reports, Audit, Users, Settings
+  lib/screens/          Login, Sell, Products, Stock, Sales, Reports, AllShops (+ allshops/), Audit, Users, Settings
+  lib/shopSwitch.ts     owner-only move between shops; reloads everything that depends on the open shop
 supabase/schema.sql     cloud tables + RLS, run once in the Supabase SQL editor
 src-tauri/
   migrations/001_init.sql   schema (add 004_*.sql for future changes, register in db.rs)
   migrations/002_sync.sql   sync queue table and triggers
   migrations/003_store_sync.sql  store-wide sync: counted levels, origin of each row
   src/shops.rs          shops on this computer: one database file per shop, shops.json
+  src/commands/overview.rs  All shops dashboard: reads every shop's database side by side
   src/sync/             background cloud sync: push (mod.rs), pull and stock rebuild (pull.rs), Supabase client
   src/db.rs             connection, pragmas, migrations
   src/models.rs         structs shared with the frontend (serialised camelCase)
@@ -120,16 +122,23 @@ The till never waits on the network. Triggers in SQLite (`src-tauri/migrations/0
 
 ### Several shops on one computer
 
-Each shop, for example Kimbo and Vintage, is completely separate: its own sales, stock, users, PINs, settings and its own Supabase project. A shop's computer holds only that shop.
+Each shop, for example Kimbo and Vintage, is completely separate: its own sales, stock, users, PINs, settings and its own Supabase project. A shop's computer holds only that shop. An owner's computer can hold several shops; each has its own database file, listed in `shops.json` in the app data folder.
 
-An owner's computer can hold several shops. Each shop there has its own database file, listed in `shops.json` in the app data folder.
-
-- **Login screen.** On a computer with more than one shop, a shop picker appears above the username. A computer with one shop, like a till, shows no picker and looks exactly as before.
-- **Switching.** Log out, or click Switch shop in the sidebar, then pick the other shop. Switching closes one shop's database and opens the other's, so nothing is ever shown together.
-- **Adding a shop.** Settings, Shops, Add shop. It opens with an empty database; log in with `admin` and PIN `1234`, change the PIN, then connect that shop's own Supabase.
+- **Logging in.** There is no shop choice on the login screen, on any computer. The username and PIN are tried in every shop on the computer and the shop they belong to opens. A cashier therefore only ever reaches their own shop and is never told that other shops exist. An owner with the same username and PIN in several shops lands in the shop used last.
+- **Moving between shops (owners only).** Switch shop in the sidebar lists the shops the login unlocked, meaning the same username and PIN belong to an active owner there. Switching closes one shop's database and opens the other's, so two shops are never shown mixed together. A shop with a different owner PIN shows as locked; sign in with that shop's PIN to open it.
+- **Adding a shop.** Settings, Shops, Add shop. The new shop gets its own empty database, the owner's own login is carried into it (there is never a default PIN), and it opens straight away. Connect it to that shop's own Supabase. It then appears in Switch shop, in the All shops screen and in its shop filter with no other setup, for any number of shops.
 - **Protection.** A shop that already holds data from one Supabase store cannot be connected to a different one, and two shops on one computer cannot share a Supabase store. Either mistake would mix two shops, so the app refuses with an explanation.
 
-Never connect an existing shop to another shop's Supabase to "look at" it. Add the other shop instead.
+### All shops dashboard (owners only)
+
+On a computer with more than one shop, owners get an **All shops** screen. Cashiers never see it, and single-shop computers such as tills do not have it.
+
+- **Overview.** Combined net sales, profit, cash and M-Pesa, then a shop-by-shop table (sales, share, average sale, payment split, discounts, voids, last sale, stock value, products running low), net sales by day per shop, best sellers across shops, and when each computer last reached its shop's cloud.
+- **Stock.** Every product with its stock in each shop side by side, matched by product name. Filter to products running low in any shop; a marker shows where shops charge different prices.
+- **Sales.** Every shop's sales in one list with the shop, receipt number, till and cashier. Click a sale for its receipt. Voiding still happens inside the shop itself.
+- **Shop filter.** The selector at the top narrows every tab to one shop. The date range applies to Overview and Sales.
+- **Freshness.** Shops that are not open are synced in the background every two minutes and whenever the screen is opened or Refresh is clicked. Each shop shows when it was last updated, and the screen still works offline with the last synced figures.
+- **Access.** A shop's figures are shown only if the login unlocked that shop (see above). Otherwise it appears as locked.
 
 ### One store, several computers
 

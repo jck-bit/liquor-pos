@@ -2,7 +2,8 @@
   import { onMount } from "svelte";
   import { api } from "../api";
   import type { AllShopsOverview } from "../types";
-  import { toasts } from "../stores/session.svelte";
+  import { session, toasts } from "../stores/session.svelte";
+  import { enterShop } from "../shopSwitch";
   import { isoDate, weekStart } from "../format";
   import DateRange from "../components/DateRange.svelte";
   import Freshness from "./allshops/Freshness.svelte";
@@ -15,6 +16,8 @@
   // Opens on this week, like Reports.
   let from = $state(weekStart(isoDate()));
   let to = $state(isoDate());
+  /** "" shows every shop; otherwise only the chosen one, on every tab. */
+  let shopId = $state("");
   let overview = $state<AllShopsOverview | null>(null);
   /** Bumped after every load so the Stock and Sales tabs reload with it. */
   let tick = $state(0);
@@ -32,7 +35,7 @@
     }
     loading = true;
     try {
-      overview = await api.allShopsOverview(from, to);
+      overview = await api.allShopsOverview(from, to, shopId || undefined);
       tick += 1;
     } catch (e) {
       toasts.error(e);
@@ -72,12 +75,22 @@
     };
   });
 
-  // Runs on mount and whenever the date range changes.
+  // Runs on mount and whenever the date range or the shop filter changes.
   $effect(() => {
     void from;
     void to;
+    void shopId;
     load();
   });
+
+  async function open(id: string) {
+    try {
+      await enterShop(id);
+      session.screen = "sell";
+    } catch (e) {
+      toasts.error(e);
+    }
+  }
 </script>
 
 <div class="page">
@@ -91,6 +104,10 @@
       </div>
     </div>
     <div class="toolbar">
+      <select class="select shop" bind:value={shopId} aria-label="Shop">
+        <option value="">All shops</option>
+        {#each session.shops?.shops ?? [] as s (s.id)}<option value={s.id}>{s.name}</option>{/each}
+      </select>
       {#if tab !== "stock"}<DateRange bind:from bind:to />{/if}
       <button class="btn" onclick={refresh}>Refresh</button>
     </div>
@@ -98,16 +115,20 @@
 
   <div class="page-body stack">
     {#if overview}
-      <Freshness shops={overview.shops} />
+      <Freshness shops={overview.shops} onopen={open} />
       {#if tab === "overview"}
         <Overview {overview} />
       {:else if tab === "stock"}
-        <StockMatrix {tick} />
+        <StockMatrix {tick} {shopId} />
       {:else}
-        <SalesList {from} {to} {tick} shops={overview.shops} />
+        <SalesList {from} {to} {tick} {shopId} />
       {/if}
     {:else}
       <div class="empty">Loading every shop…</div>
     {/if}
   </div>
 </div>
+
+<style>
+  .shop { width: 160px; }
+</style>

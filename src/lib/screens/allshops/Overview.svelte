@@ -59,20 +59,21 @@
       .map(([day, nets]) => ({ day, nets, total: nets.reduce((a, b) => a + b, 0) }));
   });
 
+  const many = $derived(shops.length > 1);
   const tills = $derived(shops.flatMap((s) => (s.figures?.tills ?? []).map((t) => ({ shop: s.name, ...t }))));
 </script>
 
 <div class="top">
   <div class="card hero">
-    <div class="label">Net sales, all shops</div>
+    <div class="label">Net sales, {many ? "all shops" : (shops[0]?.name ?? "")}</div>
     <div class="figure">KES {money(net)}</div>
-    <div class="sub">{int(count)} sales · {int(items)} items · {figures.length} of {shops.length} shops</div>
+    <div class="sub">{int(count)} sales · {int(items)} items{#if many} · {figures.length} of {shops.length} shops{/if}</div>
   </div>
   <div class="tiles">
     <div class="card stat"><div class="label">Profit</div><div class="value">{profitOf(net, cost)}</div><div class="sub">{net === 0 ? quiet : uncosted ? "add cost prices to see profit" : `${pct(net - cost, net)} margin`}</div></div>
     <div class="card stat"><div class="label">Cash</div><div class="value">{money(add(figures, (f) => f.summary.cashTotal))}</div><div class="sub">{share(add(figures, (f) => f.summary.cashTotal))}</div></div>
     <div class="card stat"><div class="label">M-Pesa</div><div class="value">{money(add(figures, (f) => f.summary.mpesaTotal))}</div><div class="sub">{share(add(figures, (f) => f.summary.mpesaTotal))}</div></div>
-    <div class="card stat"><div class="label">Running low</div><div class="value">{int(add(figures, (f) => f.stock.lowStockCount))}</div><div class="sub">products across all shops</div></div>
+    <div class="card stat"><div class="label">Running low</div><div class="value">{int(add(figures, (f) => f.stock.lowStockCount))}</div><div class="sub">{many ? "products across all shops" : "products to reorder"}</div></div>
   </div>
 </div>
 
@@ -84,7 +85,7 @@
         <tr>
           <th></th>
           {#each shops as s (s.id)}<th class="num">{s.name}</th>{/each}
-          <th class="num all">All shops</th>
+          {#if many}<th class="num all">All shops</th>{/if}
         </tr>
       </thead>
       <tbody>
@@ -97,7 +98,7 @@
             {#each shops as s (s.id)}
               <td class="num">{s.figures ? m.cell(s.figures) : dash}</td>
             {/each}
-            <td class="num all">{m.all(figures)}</td>
+            {#if many}<td class="num all">{m.all(figures)}</td>{/if}
           </tr>
         {/each}
       </tbody>
@@ -114,14 +115,14 @@
     <div class="table-wrap">
       <table class="table">
         <thead>
-          <tr><th>Day</th>{#each shops as s (s.id)}<th class="num">{s.name}</th>{/each}<th class="num">Total</th></tr>
+          <tr><th>Day</th>{#each shops as s (s.id)}<th class="num">{s.name}</th>{/each}{#if many}<th class="num">Total</th>{/if}</tr>
         </thead>
         <tbody>
           {#each days as d (d.day)}
             <tr>
               <td>{fmtDate(d.day)}</td>
               {#each d.nets as n, i (shops[i].id)}<td class="num">{n ? money(n) : dash}</td>{/each}
-              <td class="num strong">{money(d.total)}</td>
+              {#if many}<td class="num strong">{money(d.total)}</td>{/if}
             </tr>
           {:else}
             <tr><td colspan={shops.length + 2} class="empty">No sales in this period.</td></tr>

@@ -142,6 +142,24 @@ pub struct ShopSaleDetail {
 
 // ---------- reading one shop ----------
 
+/// The logged-in owner, the shops their login unlocked, and the shop filter they picked.
+pub struct Viewer {
+    pub username: String,
+    pub unlocked: Vec<String>,
+    /// Show only this shop. `None` shows every shop.
+    pub only: Option<String>,
+}
+
+impl Viewer {
+    fn from_session(session: &Session, only: Option<String>) -> AppResult<Self> {
+        let owner = require_owner(session)?;
+        Ok(Self { username: owner.username, unlocked: session.unlocked(), only: only.filter(|id| !id.is_empty()) })
+    }
+    fn shops(&self, shops: &Shops) -> Vec<Shop> {
+        shops.all().into_iter().filter(|s| self.only.as_ref().is_none_or(|id| *id == s.id)).collect()
+    }
+}
+
 enum Unreadable {
     Locked,
     Failed(String),
@@ -156,7 +174,7 @@ impl<E: std::fmt::Display> From<E> for Unreadable {
 impl Unreadable {
     fn message(&self, shop: &str) -> String {
         match self {
-            Unreadable::Locked => format!("Your login is not an owner in {shop}. Open {shop} and add it as an owner to see it here."),
+            Unreadable::Locked => format!("Your login does not open {shop}. Sign in with {shop}'s owner username and PIN, then give both shops the same PIN to see them together."),
             Unreadable::Failed(e) => e.clone(),
         }
     }
@@ -164,20 +182,23 @@ impl Unreadable {
 
 /// Run `f` against one shop's database: read-only, inside a single read
 /// transaction so all of that shop's figures describe the same moment, and only
-/// if the logged-in person is also an active owner in that shop.
+/// if the login unlocked that shop and is still an active owner there.
 fn read_shop<T>(
     shops: &Shops,
     shop: &Shop,
-    username: &str,
+    who: &Viewer,
     f: impl FnOnce(&Connection) -> AppResult<T>,
 ) -> Result<T, Unreadable> {
+    if !who.unlocked.contains(&shop.id) {
+        return Err(Unreadable::Locked);
+    }
     let conn = db::open_existing(&shops.path_of(shop))?;
     conn.pragma_update(None, "query_only", 1)?;
     // Explicitly DEFERRED: the connection default is IMMEDIATE, which would take the write lock.
     let tx = Transaction::new_unchecked(&conn, TransactionBehavior::Deferred)?;
     let is_owner: bool = tx.query_row(
         "SELECT EXISTS (SELECT 1 FROM users WHERE username = ?1 AND role = 'owner' AND active = 1)",
-        params![username],
+        params![who.username],
         |r| r.get(0),
     )?;
     if !is_owner {
@@ -302,11 +323,12 @@ pub fn all_shops_overview(
     sync: State<Sync>,
     from: String,
     to: String,
+    shop_id: Option<String>,
 ) -> AppResult<AllShopsOverview> {
-    let owner = require_owner(&session)?;
+    let who = Viewer::from_session(&session, shop_id)?;
     check_range(&from, &to)?;
     let open_status = sync.status();
-    Ok(build_overview(&shops, &owner.username, &from, &to, |shop, is_open| {
+    Ok(build_overview(&shops, &who, &from, &to, |shop, is_open| {
         if is_open {
             (open_status.syncing, open_status.last_error.clone())
         } else {
@@ -319,17 +341,17 @@ pub fn all_shops_overview(
 /// `sync_state(shop, is_open)` returns (syncing, last sync error) for a shop.
 fn build_overview(
     shops: &Shops,
-    username: &str,
+    who: &Viewer,
     from: &str,
     to: &str,
     sync_state: impl Fn(&Shop, bool) -> (bool, Option<String>),
 ) -> AllShopsOverview {
     let mut out = Vec::new();
     let mut sold = Vec::new();
-    for shop in shops.all() {
+    for shop in who.shops(shops) {
         let is_open = shops.is_current(&shop.id);
         let (syncing, sync_error) = sync_state(&shop, is_open);
-        let read = read_shop(shops, &shop, username, |conn| {
+        let read = read_shop(shops, &shop, who, |conn| {
             let figures = ShopFigures {
                 summary: sales_summary_for(conn, from, to)?,
                 stock: stock_value_for(conn)?,
@@ -367,16 +389,16 @@ fn build_overview(
 }
 
 #[tauri::command(async)]
-pub fn all_shops_stock(shops: State<Shops>, session: State<Session>) -> AppResult<StockMatrix> {
-    let owner = require_owner(&session)?;
-    Ok(build_stock(&shops, &owner.username))
+pub fn all_shops_stock(shops: State<Shops>, session: State<Session>, shop_id: Option<String>) -> AppResult<StockMatrix> {
+    let who = Viewer::from_session(&session, shop_id)?;
+    Ok(build_stock(&shops, &who))
 }
 
-fn build_stock(shops: &Shops, username: &str) -> StockMatrix {
+fn build_stock(shops: &Shops, who: &Viewer) -> StockMatrix {
     let mut refs = Vec::new();
     let mut per_shop = Vec::new();
-    for shop in shops.all() {
-        let (products, error) = match read_shop(shops, &shop, username, product_stock) {
+    for shop in who.shops(shops) {
+        let (products, error) = match read_shop(shops, &shop, who, product_stock) {
             Ok(products) => (products, None),
             Err(e) => (Vec::new(), Some(e.message(&shop.name))),
         };
@@ -396,28 +418,17 @@ pub fn all_shops_sales(
     payment_method: Option<String>,
     limit: Option<i64>,
 ) -> AppResult<Vec<ShopSale>> {
-    let owner = require_owner(&session)?;
+    let who = Viewer::from_session(&session, shop_id)?;
     check_range(&from, &to)?;
     let limit = limit.unwrap_or(300).clamp(1, 2000);
-    Ok(build_sales(&shops, &owner.username, &from, &to, shop_id.as_deref(), payment_method.as_deref(), limit))
+    Ok(build_sales(&shops, &who, &from, &to, payment_method.as_deref(), limit))
 }
 
-fn build_sales(
-    shops: &Shops,
-    username: &str,
-    from: &str,
-    to: &str,
-    shop_id: Option<&str>,
-    payment_method: Option<&str>,
-    limit: i64,
-) -> Vec<ShopSale> {
+fn build_sales(shops: &Shops, who: &Viewer, from: &str, to: &str, payment_method: Option<&str>, limit: i64) -> Vec<ShopSale> {
     let mut all = Vec::new();
-    for shop in shops.all() {
-        if shop_id.is_some_and(|id| id != shop.id) {
-            continue;
-        }
+    for shop in who.shops(shops) {
         // A shop that cannot be read is simply absent here; the Overview tab says why.
-        if let Ok(sales) = read_shop(shops, &shop, username, |conn| list_sales_for(conn, from, to, payment_method, limit)) {
+        if let Ok(sales) = read_shop(shops, &shop, who, |conn| list_sales_for(conn, from, to, payment_method, limit)) {
             all.extend(sales.into_iter().map(|sale| ShopSale { shop_id: shop.id.clone(), shop_name: shop.name.clone(), sale }));
         }
     }
@@ -435,9 +446,9 @@ pub fn shop_sale_detail(
     shop_id: String,
     sale_id: i64,
 ) -> AppResult<ShopSaleDetail> {
-    let owner = require_owner(&session)?;
+    let who = Viewer::from_session(&session, None)?;
     let shop = shops.get(&shop_id)?;
-    read_shop(&shops, &shop, &owner.username, |conn| {
+    read_shop(&shops, &shop, &who, |conn| {
         Ok(ShopSaleDetail {
             shop_id: shop.id.clone(),
             shop_name: shop.name.clone(),
@@ -524,27 +535,46 @@ mod tests {
         fill(&first, 4, 60_000, true);
         fill(&second, 40, 90_000, true);
 
-        let o = build_overview(&shops, "ADMIN", "2026-03-05", "2026-03-05", |_, _| (false, None));
+        let viewer = |username: &str, unlocked: &[&str], only: Option<&str>| Viewer {
+            username: username.into(),
+            unlocked: unlocked.iter().map(|s| s.to_string()).collect(),
+            only: only.map(str::to_string),
+        };
+        let both = [first.id.as_str(), second.id.as_str()];
+        let admin = viewer("admin", &both, None);
+
+        let o = build_overview(&shops, &viewer("ADMIN", &both, None), "2026-03-05", "2026-03-05", |_, _| (false, None));
         let nets: Vec<i64> = o.shops.iter().map(|s| s.figures.as_ref().unwrap().summary.net).collect();
         assert_eq!(nets, [60_000, 90_000], "each shop reports its own sales; usernames match without case");
         assert_eq!(o.shops.iter().filter(|s| s.is_open).count(), 1);
         assert_eq!(o.best_sellers[0].per_shop, vec![2, 2]);
         assert_eq!(o.best_sellers[0].revenue, 150_000);
 
-        let m = build_stock(&shops, "admin");
+        let m = build_stock(&shops, &admin);
         assert_eq!(m.rows.len(), 1);
         assert_eq!(m.rows[0].total, 44);
         assert!(m.rows[0].cells[0].as_ref().unwrap().low && !m.rows[0].cells[1].as_ref().unwrap().low);
 
-        let sales = build_sales(&shops, "admin", "2026-03-05", "2026-03-05", None, None, 10);
+        let sales = build_sales(&shops, &admin, "2026-03-05", "2026-03-05", None, 10);
         assert_eq!(sales.len(), 2);
-        assert_eq!(build_sales(&shops, "admin", "2026-03-05", "2026-03-05", Some(&second.id), None, 10).len(), 1);
 
-        // Someone who is not an owner in the second shop sees it locked, with no figures.
-        db::open_shop(&shops.path_of(&second)).unwrap().execute("UPDATE users SET role = 'cashier'", []).unwrap();
-        let o = build_overview(&shops, "admin", "2026-03-05", "2026-03-05", |_, _| (false, None));
+        // Filtering by shop narrows every view to that shop.
+        let only_second = viewer("admin", &both, Some(&second.id));
+        assert_eq!(build_sales(&shops, &only_second, "2026-03-05", "2026-03-05", None, 10).len(), 1);
+        let o = build_overview(&shops, &only_second, "2026-03-05", "2026-03-05", |_, _| (false, None));
+        assert_eq!(o.shops.len(), 1);
+        assert_eq!(o.best_sellers[0].per_shop, vec![2]);
+        assert_eq!(build_stock(&shops, &only_second).rows[0].total, 40);
+
+        // A shop the login did not unlock stays locked, even though the username is an owner there.
+        let o = build_overview(&shops, &viewer("admin", &[&first.id], None), "2026-03-05", "2026-03-05", |_, _| (false, None));
         assert!(o.shops[1].locked && o.shops[1].figures.is_none() && o.shops[0].figures.is_some());
-        assert_eq!(build_sales(&shops, "admin", "2026-03-05", "2026-03-05", None, None, 10).len(), 1);
+
+        // Someone who is no longer an owner in the second shop sees it locked too.
+        db::open_shop(&shops.path_of(&second)).unwrap().execute("UPDATE users SET role = 'cashier'", []).unwrap();
+        let o = build_overview(&shops, &admin, "2026-03-05", "2026-03-05", |_, _| (false, None));
+        assert!(o.shops[1].locked && o.shops[1].figures.is_none() && o.shops[0].figures.is_some());
+        assert_eq!(build_sales(&shops, &admin, "2026-03-05", "2026-03-05", None, 10).len(), 1);
 
         // Reading never writes: no audit rows, nothing queued beyond what each shop already had.
         let conn = db::open_existing(&shops.path_of(&first)).unwrap();
@@ -557,8 +587,9 @@ mod tests {
     fn real_shops_report() {
         let Some(dir) = std::env::var_os("LIQUORPOS_APPDATA_COPY").map(std::path::PathBuf::from) else { return };
         let shops = Shops::load(&dir).unwrap();
+        let admin = Viewer { username: "admin".into(), unlocked: shops.all().into_iter().map(|s| s.id).collect(), only: None };
         let (from, to) = (std::env::var("FROM").unwrap_or("2026-09-01".into()), std::env::var("TO").unwrap_or("2026-09-30".into()));
-        let o = build_overview(&shops, "admin", &from, &to, |_, _| (false, None));
+        let o = build_overview(&shops, &admin, &from, &to, |_, _| (false, None));
         for s in &o.shops {
             match &s.figures {
                 Some(f) => eprintln!(
@@ -573,11 +604,11 @@ mod tests {
         for b in o.best_sellers.iter().take(5) {
             eprintln!("REPORT best seller {} qty {} revenue {} per shop {:?}", b.name, b.qty, b.revenue, b.per_shop);
         }
-        let m = build_stock(&shops, "admin");
+        let m = build_stock(&shops, &admin);
         let only_one = m.rows.iter().filter(|r| r.cells.iter().flatten().count() == 1).count();
         let differs = m.rows.iter().filter(|r| r.price_differs).count();
         eprintln!("REPORT stock rows {} (in one shop only {}, price differs {})", m.rows.len(), only_one, differs);
-        let sales = build_sales(&shops, "admin", &from, &to, None, None, 5);
+        let sales = build_sales(&shops, &admin, &from, &to, None, 5);
         for s in &sales {
             eprintln!("REPORT sale {} #{} {} {} {:?}", s.shop_name, s.sale.receipt_no, s.sale.created_at, s.sale.total, s.sale.till);
         }

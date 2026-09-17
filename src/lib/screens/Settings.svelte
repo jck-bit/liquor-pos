@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { api } from "../api";
   import { session, toasts } from "../stores/session.svelte";
+  import { reloadShopContext } from "../shopSwitch";
   import { cart } from "../stores/cart.svelte";
 
   let newShop = $state("");
@@ -13,13 +14,12 @@
     if (!name || addingShop) return;
     addingShop = true;
     try {
-      session.shops = await api.addShop(name);
-      session.settings = await api.getSettings();
+      await api.addShop(name);
       newShop = "";
       cart.clear();
-      session.notice = `${name} is ready with its own empty database. Log in with admin and PIN 1234, change the PIN, then connect ${name}'s own Supabase in Settings.`;
-      session.user = null;
-      session.screen = "sell";
+      // The new shop is open now, with this same login carried into it.
+      await reloadShopContext();
+      toasts.success(`${name} is ready and open. Connect ${name}'s own Supabase under Cloud sync.`);
     } catch (err) {
       toasts.error(err);
     } finally {
@@ -173,7 +173,7 @@
       <div class="stack">
         <div class="card card-body stack">
           <h2>Shops on this computer</h2>
-          <p class="muted">Each shop has its own sales, stock, users and cloud connection. Nothing is shared between shops. Choose the shop on the login screen.</p>
+          <p class="muted">Each shop has its own sales, stock, users and cloud connection. Nothing is shared between shops. Owners move between them with Switch shop and see them together under All shops. Cashiers only ever see their own shop.</p>
           {#if session.shops}
             <ul class="shoplist">
               {#each session.shops.shops as s (s.id)}
@@ -191,7 +191,7 @@
             <input class="input" bind:value={newShop} placeholder="New shop name, e.g. Vintage" maxlength="40" />
             <button class="btn" type="submit" disabled={!newShop.trim() || addingShop}>Add shop</button>
           </form>
-          <p class="muted small">Adding a shop opens it straight away with an empty database. Connect it only to that shop's own Supabase.</p>
+          <p class="muted small">Adding a shop opens it straight away with an empty database and your own login. Connect it only to that shop's own Supabase.</p>
         </div>
         <form class="card card-body stack" onsubmit={connectSync}>
           <div class="row between">

@@ -65,12 +65,13 @@ export const api = {
 
   // shops on this computer
   listShops: () => invoke<ShopList>("list_shops"),
-  openShop: (shopId: string) => invoke<ShopList>("open_shop", { shopId }),
+  enterShop: (shopId: string) => invoke<ShopList>("enter_shop", { shopId }),
   addShop: (name: string) => invoke<ShopList>("add_shop", { name }),
 
   // all shops dashboard (owner only)
-  allShopsOverview: (from: string, to: string) => invoke<AllShopsOverview>("all_shops_overview", { from, to }),
-  allShopsStock: () => invoke<StockMatrix>("all_shops_stock"),
+  allShopsOverview: (from: string, to: string, shopId?: string) =>
+    invoke<AllShopsOverview>("all_shops_overview", { from, to, shopId: shopId ?? null }),
+  allShopsStock: (shopId?: string) => invoke<StockMatrix>("all_shops_stock", { shopId: shopId ?? null }),
   allShopsSales: (from: string, to: string, shopId?: string, paymentMethod?: PaymentMethod, limit = 300) =>
     invoke<ShopSale[]>("all_shops_sales", { from, to, shopId: shopId ?? null, paymentMethod: paymentMethod ?? null, limit }),
   shopSaleDetail: (shopId: string, saleId: number) => invoke<ShopSaleDetail>("shop_sale_detail", { shopId, saleId }),

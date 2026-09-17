@@ -172,10 +172,15 @@ export interface ShopInfo {
   id: string;
   name: string;
   connected: boolean;
+  /** The logged-in owner's username and PIN also open this shop. */
+  unlocked: boolean;
 }
+/** Empty before login, the cashier's own shop for a cashier, every shop for an owner. */
 export interface ShopList {
   shops: ShopInfo[];
   current: string;
+  /** This computer holds more than one shop. */
+  multi: boolean;
 }
 
 // ---------- All shops dashboard ----------

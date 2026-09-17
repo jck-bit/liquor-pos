@@ -2,7 +2,7 @@
   import type { ShopOverview } from "../../types";
   import { ago } from "../../format";
 
-  let { shops }: { shops: ShopOverview[] } = $props();
+  let { shops, onopen }: { shops: ShopOverview[]; onopen: (shopId: string) => void } = $props();
 
   type State = { dot: "ok" | "busy" | "off" | "idle"; text: string; title?: string };
   const TEN_MINUTES = 10 * 60 * 1000;
@@ -29,6 +29,7 @@
       {#if s.isOpen}<span class="badge badge-gray">open</span>{/if}
       <span class="muted">{st.text}</span>
       {#if s.figures && s.figures.pending > 0}<span class="muted">· {s.figures.pending} waiting to upload</span>{/if}
+      {#if !s.isOpen && !s.locked && !s.error}<button class="open" onclick={() => onopen(s.id)}>Open</button>{/if}
     </div>
   {/each}
 </div>
@@ -40,6 +41,8 @@
     background: var(--surface); border: 1px solid var(--border); border-radius: 999px;
   }
   .name { font-weight: 600; }
+  .open { border: 0; background: transparent; color: var(--accent); font-weight: 600; cursor: pointer; padding: 0 2px; }
+  .open:hover { text-decoration: underline; }
   .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--ink-3); }
   .dot.ok { background: #16a34a; }
   .dot.busy { background: #d97706; }
