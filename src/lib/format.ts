@@ -51,4 +51,18 @@ export function fmtDate(s: string): string {
   if (isNaN(d.getTime())) return s;
   return d.toLocaleDateString("en-KE", { weekday: "short", day: "2-digit", month: "short" });
 }
+/** "2026-09-11 14:03:22" -> "14:03" */
+export const fmtTime = (s: string) => s.slice(11, 16);
+
+/** How long ago a local timestamp was: "just now", "12 min ago", "3 h ago", "2 days ago". */
+export function ago(s: string, now = Date.now()): string {
+  const t = new Date(s.replace(" ", "T")).getTime();
+  if (isNaN(t)) return s;
+  const min = Math.max(0, Math.round((now - t) / 60000));
+  if (min < 2) return "just now";
+  if (min < 60) return `${min} min ago`;
+  if (min < 48 * 60) return `${Math.round(min / 60)} h ago`;
+  return `${Math.round(min / 1440)} days ago`;
+}
+
 export const receiptNo = (id: number) => `#${String(id).padStart(6, "0")}`;

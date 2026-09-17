@@ -573,8 +573,9 @@ mod tests {
     use std::collections::BTreeMap;
     use std::path::{Path, PathBuf};
 
+    /// Optional real-data snapshot. Absent (or cleaned up) means the replay test is skipped.
     fn fixtures() -> Option<PathBuf> {
-        std::env::var_os("LIQUORPOS_FIXTURES").map(PathBuf::from)
+        std::env::var_os("LIQUORPOS_FIXTURES").map(PathBuf::from).filter(|dir| dir.join("mac.db").is_file())
     }
 
     fn rows(dir: &Path, table: &str) -> Vec<Value> {
@@ -628,10 +629,64 @@ mod tests {
         set_setting(conn, "sync_pulling", "0").unwrap();
     }
 
+    /// Needs no snapshot: the rules every computer relies on to agree on stock.
+    #[test]
+    fn stock_follows_the_latest_count_whatever_order_rows_arrive_in() {
+        let conn = crate::db::open_shop(&temp_db("rules")).unwrap();
+        // The new shop's own admin account is already waiting to upload; pulled rows must add nothing.
+        let queued = scalar(&conn, "SELECT COUNT(*) FROM sync_outbox");
+        let product = |uid: &str, name: &str| serde_json::json!({
+            "uid": uid, "name": name, "sell_price": 30000, "stock_qty": 0, "active": true, "updated_at": "2026-01-01T09:00:00"
+        });
+        let sale = |uid: &str, at: &str| serde_json::json!({
+            "uid": uid, "user_uid": "u-cashier", "cashier": "cashier one", "subtotal": 30000, "total": 30000,
+            "payment_method": "cash", "status": "completed", "created_at": at, "device_id": "till-1", "local_id": 7
+        });
+        let mv = |uid: &str, product: &str, delta: i64, reason: &str, at: &str, count_to: Option<i64>, sale: Option<&str>| serde_json::json!({
+            "uid": uid, "product_uid": product, "qty_delta": delta, "reason": reason, "created_at": at,
+            "count_to": count_to, "sale_uid": sale, "user_uid": "u-cashier", "device_id": "till-1"
+        });
+        let movements = vec![
+            mv("m1", "p-counted", 31, "purchase", "2026-01-01T12:00:00", None, None),
+            mv("m2", "p-counted", -1, "sale", "2026-01-01T17:00:00", None, Some("s1")),
+            mv("m3", "p-counted", -21, "count", "2026-01-01T22:30:00", Some(10), None),
+            mv("m4", "p-counted", -2, "sale", "2026-01-01T23:00:00", None, Some("s2")),
+            mv("m5", "p-plain", 30, "purchase", "2026-01-01T12:00:00", None, None),
+            mv("m6", "p-plain", -4, "sale", "2026-01-01T18:00:00", None, Some("s1")),
+        ];
+
+        set_setting(&conn, "sync_pulling", "1").unwrap();
+        // A sale line that arrives before its sale is held back, not lost.
+        let early = serde_json::json!({ "uid": "i1", "sale_uid": "s1", "product_uid": "p-plain", "product_name": "Plain", "qty": 4,
+            "unit_price": 30000, "line_total": 120000, "synced_at": "2026-01-01T18:00:05Z" });
+        assert_eq!(apply(&conn, "sale_items", &[early.clone()]).unwrap().hold.as_deref(), Some("2026-01-01T18:00:05Z"));
+
+        apply(&conn, "products", &[product("p-counted", "Counted"), product("p-plain", "Plain")]).unwrap();
+        apply(&conn, "sales", &[sale("s1", "2026-01-01T17:00:00"), sale("s2", "2026-01-01T23:00:00")]).unwrap();
+        assert!(apply(&conn, "sale_items", &[early]).unwrap().hold.is_none());
+
+        // Newest first, then again: order and repetition must not matter.
+        let mut touched = BTreeSet::new();
+        for batch in [movements.iter().rev().cloned().collect::<Vec<_>>(), movements.clone()] {
+            let applied = apply(&conn, "stock_movements", &batch).unwrap();
+            assert!(applied.hold.is_none());
+            touched.extend(applied.touched);
+        }
+        recompute_stock(&conn, &touched).unwrap();
+        set_setting(&conn, "sync_pulling", "0").unwrap();
+
+        assert_eq!(stock(&conn, "Counted"), 8, "the count of 10 at 22:30, minus the 2 sold after it");
+        assert_eq!(stock(&conn, "Plain"), 26, "never counted: deliveries minus sales");
+        assert_eq!(scalar(&conn, "SELECT COUNT(*) FROM stock_movements"), 6, "applying rows twice adds nothing");
+        assert_eq!(scalar(&conn, "SELECT COUNT(*) FROM sync_outbox"), queued, "received rows are never queued for upload");
+        assert_eq!(scalar(&conn, "SELECT COUNT(*) FROM users WHERE username = 'cashier one' AND pin_hash = ''"), 1);
+        assert_eq!(scalar(&conn, "SELECT origin_no FROM sales WHERE uid = 's1'"), 7, "the till's receipt number is kept");
+    }
+
     #[test]
     fn store_wide_pull_replays_real_data() {
         let Some(dir) = fixtures() else {
-            eprintln!("LIQUORPOS_FIXTURES not set; skipping");
+            eprintln!("no LIQUORPOS_FIXTURES snapshot; skipping the real-data replay");
             return;
         };
 

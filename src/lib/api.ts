@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  AllShopsOverview, ShopSale, ShopSaleDetail, StockMatrix,
   AuditEntry, DailyPoint, ImportResult, ImportRow, PaymentMethod, Product, ProductInput, ReceiveLine, Sale, SaleDetail,
   SaleInput, SalesSummary, ShopList, StockMovement, StockValue, SyncStatus, TopProduct, User,
 } from "./types";
@@ -66,4 +67,12 @@ export const api = {
   listShops: () => invoke<ShopList>("list_shops"),
   openShop: (shopId: string) => invoke<ShopList>("open_shop", { shopId }),
   addShop: (name: string) => invoke<ShopList>("add_shop", { name }),
+
+  // all shops dashboard (owner only)
+  allShopsOverview: (from: string, to: string) => invoke<AllShopsOverview>("all_shops_overview", { from, to }),
+  allShopsStock: () => invoke<StockMatrix>("all_shops_stock"),
+  allShopsSales: (from: string, to: string, shopId?: string, paymentMethod?: PaymentMethod, limit = 300) =>
+    invoke<ShopSale[]>("all_shops_sales", { from, to, shopId: shopId ?? null, paymentMethod: paymentMethod ?? null, limit }),
+  shopSaleDetail: (shopId: string, saleId: number) => invoke<ShopSaleDetail>("shop_sale_detail", { shopId, saleId }),
+  refreshAllShops: () => invoke<void>("refresh_all_shops"),
 };

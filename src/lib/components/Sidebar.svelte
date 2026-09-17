@@ -12,12 +12,14 @@
     return { dot: "ok", text: "Cloud synced" };
   });
 
-  const items: { key: Screen; label: string; owner?: boolean }[] = [
+  // `multi`: only on a computer that holds more than one shop.
+  const items: { key: Screen; label: string; owner?: boolean; multi?: boolean }[] = [
     { key: "sell", label: "Sell" },
     { key: "products", label: "Products" },
     { key: "stock", label: "Stock" },
     { key: "sales", label: "Sales" },
     { key: "reports", label: "Reports" },
+    { key: "allshops", label: "All shops", owner: true, multi: true },
     { key: "audit", label: "Audit log", owner: true },
     { key: "users", label: "Users", owner: true },
     { key: "settings", label: "Settings", owner: true },
@@ -42,7 +44,7 @@
   </div>
   <ul>
     {#each items as item (item.key)}
-      {#if !item.owner || session.isOwner}
+      {#if (!item.owner || session.isOwner) && (!item.multi || session.multiShop)}
         <li>
           <button class:active={session.screen === item.key} onclick={() => (session.screen = item.key)}>
             {item.label}

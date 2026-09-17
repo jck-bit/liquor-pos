@@ -1,6 +1,6 @@
 import type { ShopList, SyncStatus, User } from "../types";
 
-export type Screen = "sell" | "products" | "stock" | "sales" | "reports" | "audit" | "users" | "settings";
+export type Screen = "sell" | "products" | "stock" | "sales" | "reports" | "allshops" | "audit" | "users" | "settings";
 
 class Session {
   user = $state<User | null>(null);

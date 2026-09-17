@@ -8,10 +8,12 @@
 pub mod pull;
 pub mod supabase;
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Mutex, MutexGuard};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
@@ -19,12 +21,15 @@ use serde_json::Value;
 use tauri::{AppHandle, Manager};
 
 use crate::db::Db;
+use crate::shops::{Shop, Shops};
 use supabase::{Client, Tokens};
 
 /// Push order matters only for readability in the cloud; there are no FKs there.
 const PUSH_ORDER: &[&str] = &["users", "products", "sales", "sale_items", "stock_movements", "audit_log"];
 const BATCH: i64 = 300;
 const INTERVAL: Duration = Duration::from_secs(30);
+/// How often the shops that are not open are synced in the background.
+const OTHERS_INTERVAL: Duration = Duration::from_secs(120);
 
 #[derive(Debug, Clone, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -38,14 +43,39 @@ pub struct SyncStatus {
     pub last_error: Option<String>,
 }
 
+/// Background sync state of a shop that is not the open one.
+#[derive(Debug, Clone, Default)]
+pub struct OtherSync {
+    pub syncing: bool,
+    pub last_error: Option<String>,
+}
+
 pub struct Sync {
     tx: Mutex<Sender<()>>,
     status: Mutex<SyncStatus>,
+    /// Set by the All shops screen: sync the other shops on the next pass, not in two minutes.
+    all: AtomicBool,
+    others: Mutex<HashMap<String, OtherSync>>,
 }
 
 impl Sync {
     pub fn kick(&self) {
         let _ = self.tx.lock().unwrap_or_else(|e| e.into_inner()).send(());
+    }
+    /// Sync every shop on this computer now, not only the open one.
+    pub fn kick_all(&self) {
+        self.all.store(true, Ordering::SeqCst);
+        self.kick();
+    }
+    pub fn other(&self, shop_id: &str) -> OtherSync {
+        self.others.lock().unwrap_or_else(|e| e.into_inner()).get(shop_id).cloned().unwrap_or_default()
+    }
+    fn set_other(&self, shop_id: &str, state: Option<OtherSync>) {
+        let mut map = self.others.lock().unwrap_or_else(|e| e.into_inner());
+        match state {
+            Some(s) => map.insert(shop_id.to_string(), s),
+            None => map.remove(shop_id),
+        };
     }
     /// A different shop was opened: its status starts empty until its first pass.
     pub fn reset(&self) {
@@ -65,17 +95,32 @@ impl Sync {
 pub struct PassDb<'a> {
     db: &'a Db,
     generation: u64,
+    /// Background pass for a shop that is not open: stop as soon as the user opens
+    /// that shop, because its own pass on the main connection takes over.
+    yield_to: Option<(&'a Shops, &'a str)>,
 }
+
+const YIELDED: &str = "This shop was opened, so its background sync stopped.";
 
 impl<'a> PassDb<'a> {
     pub fn lock(&self) -> Result<MutexGuard<'a, Connection>, String> {
+        if let Some((shops, id)) = self.yield_to {
+            if shops.is_current(id) {
+                return Err(YIELDED.into());
+            }
+        }
         self.db.lock_if(self.generation)
     }
 }
 
 pub fn start(app: AppHandle) {
     let (tx, rx) = channel::<()>();
-    app.manage(Sync { tx: Mutex::new(tx), status: Mutex::new(SyncStatus::default()) });
+    app.manage(Sync {
+        tx: Mutex::new(tx),
+        status: Mutex::new(SyncStatus::default()),
+        all: AtomicBool::new(false),
+        others: Mutex::new(HashMap::new()),
+    });
     std::thread::Builder::new()
         .name("cloud-sync".into())
         .spawn(move || worker(app, rx))
@@ -85,10 +130,56 @@ pub fn start(app: AppHandle) {
 fn worker(app: AppHandle, rx: Receiver<()>) {
     // First run shortly after startup, then every INTERVAL or whenever kicked.
     let _ = rx.recv_timeout(Duration::from_secs(3));
+    let mut others_due = Instant::now();
     loop {
         run_once(&app);
+        let asked = app.state::<Sync>().all.swap(false, Ordering::SeqCst);
+        if asked || Instant::now() >= others_due {
+            run_others(&app);
+            others_due = Instant::now() + OTHERS_INTERVAL;
+        }
         let _ = rx.recv_timeout(INTERVAL);
     }
+}
+
+/// Sync the connected shops that are not open, one after another on this same
+/// thread, so two sync passes never run at once. A till has no other shops, so
+/// this returns straight away there.
+fn run_others(app: &AppHandle) {
+    let shops = app.state::<Shops>().inner();
+    let sync = app.state::<Sync>().inner();
+    let version = app.package_info().version.to_string();
+    for shop in shops.all() {
+        if !shop.connected || shops.is_current(&shop.id) {
+            continue;
+        }
+        let before = sync.other(&shop.id);
+        sync.set_other(&shop.id, Some(OtherSync { syncing: true, ..before }));
+        let result = run_other(shops, &shop, &shops.path_of(&shop), &version);
+        if shops.is_current(&shop.id) {
+            // The user opened this shop meanwhile; its own status takes over.
+            sync.set_other(&shop.id, None);
+        } else {
+            sync.set_other(&shop.id, Some(OtherSync { syncing: false, last_error: result.err() }));
+        }
+    }
+}
+
+/// One full pass (push, heartbeat, pull) for a shop that is not open, on its own
+/// connection. A full pass rather than pull-only, so changes made in that shop
+/// before switching away still reach its cloud.
+fn run_other(shops: &Shops, shop: &Shop, path: &Path, version: &str) -> Result<(), String> {
+    // `open_existing`, not `open_shop`: never create, seed or write audit rows here.
+    let db = Db::new(crate::db::open_existing(path).map_err(|e| e.to_string())?);
+    let pass = PassDb { db: &db, generation: db.generation(), yield_to: Some((shops, &shop.id)) };
+    let cfg = {
+        let conn = pass.lock()?;
+        load_config(&conn).ok_or("Cloud sync is not set up for this shop.")?
+    };
+    sync_pass(&pass, &cfg, version)?;
+    let conn = pass.lock()?;
+    let now = local_now(&conn);
+    set_setting(&conn, "sync_last_ok", &now).map_err(|e| e.to_string())
 }
 
 // ---------- settings helpers ----------
@@ -158,7 +249,7 @@ pub fn store_tokens(conn: &Connection, t: &Tokens) -> rusqlite::Result<()> {
 fn run_once(app: &AppHandle) {
     let db = app.state::<Db>().inner();
     let sync = app.state::<Sync>();
-    let pass = PassDb { db, generation: db.generation() };
+    let pass = PassDb { db, generation: db.generation(), yield_to: None };
 
     let cfg = {
         let Ok(conn) = pass.lock() else { return };
@@ -328,4 +419,61 @@ fn push(db: &PassDb, client: &Client, tokens: &Tokens, cfg: &Config) -> Result<(
 
 pub(crate) fn urlencode(s: &str) -> String {
     s.replace(' ', "%20").replace(':', "%3A").replace('+', "%2B")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_path(name: &str) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!("liquorpos-sync-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&path);
+        for ext in ["", "-wal", "-shm"] {
+            let _ = std::fs::remove_file(format!("{}{ext}", path.display()));
+        }
+        path
+    }
+
+    #[test]
+    fn a_background_pass_stops_when_its_shop_is_opened() {
+        let dir = temp_path("yield");
+        std::fs::create_dir_all(&dir).unwrap();
+        let shops = Shops::load(&dir).unwrap();
+        let vintage = shops.add("Vintage").unwrap();
+        let db = Db::new(Connection::open_in_memory().unwrap());
+        let pass = PassDb { db: &db, generation: db.generation(), yield_to: Some((&shops, &vintage.id)) };
+
+        assert!(pass.lock().is_ok(), "Vintage is not open, so its background pass may run");
+        shops.set_current(&vintage.id).unwrap();
+        assert_eq!(pass.lock().err().as_deref(), Some(YIELDED), "once Vintage is opened the background pass must stop");
+    }
+
+    #[test]
+    fn rows_pulled_on_a_second_connection_are_not_queued_for_upload() {
+        let path = temp_path("flag.db");
+        let main = crate::db::open_shop(&path).unwrap();
+        let mut background = crate::db::open_existing(&path).unwrap();
+        let queued = pending_count(&main);
+
+        // The background pass applies a product that came from the cloud.
+        let tx = background.transaction().unwrap();
+        set_setting(&tx, "sync_pulling", "1").unwrap();
+        let row = serde_json::json!({
+            "uid": "cloud-product-1", "name": "Tusker Lager Can", "sell_price": 30000, "cost_price": 0,
+            "stock_qty": 12, "reorder_level": 5, "active": true, "updated_at": "2026-09-17T10:00:00"
+        });
+        let applied = pull::apply(&tx, "products", &[row]).unwrap();
+        assert!(applied.hold.is_none());
+        set_setting(&tx, "sync_pulling", "0").unwrap();
+        tx.commit().unwrap();
+
+        let seen: i64 = main.query_row("SELECT COUNT(*) FROM products WHERE uid = 'cloud-product-1'", [], |r| r.get(0)).unwrap();
+        assert_eq!(seen, 1, "the open shop's connection sees the pulled product");
+        assert_eq!(pending_count(&main), queued, "a pulled row must never be sent back to the cloud");
+        assert_eq!(setting(&main, "sync_pulling").as_deref(), Some("0"), "the flag is never visible outside its transaction");
+
+        // A change made in the app itself is still queued.
+        main.execute("INSERT INTO products (name, sell_price) VALUES ('Made here', 10000)", []).unwrap();
+        assert_eq!(pending_count(&main), queued + 1);
+    }
 }

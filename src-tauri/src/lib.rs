@@ -75,6 +75,11 @@ pub fn run() {
             commands::shops::list_shops,
             commands::shops::open_shop,
             commands::shops::add_shop,
+            commands::overview::all_shops_overview,
+            commands::overview::all_shops_stock,
+            commands::overview::all_shops_sales,
+            commands::overview::shop_sale_detail,
+            commands::overview::refresh_all_shops,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Liquor POS");

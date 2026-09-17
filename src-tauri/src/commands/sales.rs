@@ -36,7 +36,7 @@ fn row_to_sale(r: &rusqlite::Row) -> rusqlite::Result<Sale> {
     })
 }
 
-fn load_sale(conn: &Connection, id: i64) -> AppResult<SaleDetail> {
+pub(crate) fn load_sale(conn: &Connection, id: i64) -> AppResult<SaleDetail> {
     let sql = format!("{SALE_SELECT} WHERE s.id = ?1");
     let sale = conn
         .query_row(&sql, params![id], row_to_sale)
@@ -204,14 +204,23 @@ pub fn list_sales(
     limit: Option<i64>,
 ) -> AppResult<Vec<Sale>> {
     require_user(&session)?;
-    let conn = db.lock();
+    list_sales_for(&db.lock(), &from, &to, payment_method.as_deref(), limit.unwrap_or(500))
+}
+
+pub(crate) fn list_sales_for(
+    conn: &Connection,
+    from: &str,
+    to: &str,
+    payment_method: Option<&str>,
+    limit: i64,
+) -> AppResult<Vec<Sale>> {
     let sql = format!(
         "{SALE_SELECT} WHERE s.created_at >= ?1 AND s.created_at < date(?2, '+1 day')
            AND (?3 IS NULL OR s.payment_method = ?3)
          ORDER BY s.created_at DESC, s.id DESC LIMIT ?4"
     );
     let mut stmt = conn.prepare_cached(&sql)?;
-    let rows = stmt.query_map(params![from, to, payment_method, limit.unwrap_or(500)], row_to_sale)?;
+    let rows = stmt.query_map(params![from, to, payment_method, limit], row_to_sale)?;
     Ok(rows.collect::<Result<_, _>>()?)
 }
 

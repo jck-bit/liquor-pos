@@ -177,3 +177,80 @@ export interface ShopList {
   shops: ShopInfo[];
   current: string;
 }
+
+// ---------- All shops dashboard ----------
+
+export interface Till {
+  name: string;
+  lastSeen: string | null;
+  thisComputer: boolean;
+}
+export interface ShopFigures {
+  summary: SalesSummary;
+  stock: StockValue;
+  lastSaleAt: string | null;
+  daily: DailyPoint[];
+  tills: Till[];
+  pending: number;
+  lastSynced: string | null;
+}
+export interface ShopOverview {
+  id: string;
+  name: string;
+  isOpen: boolean;
+  connected: boolean;
+  syncing: boolean;
+  syncError: string | null;
+  locked: boolean;
+  error: string | null;
+  figures: ShopFigures | null;
+}
+export interface BestSeller {
+  name: string;
+  qty: number;
+  revenue: number;
+  /** Quantity per shop, in the same order as AllShopsOverview.shops. */
+  perShop: number[];
+}
+export interface AllShopsOverview {
+  shops: ShopOverview[];
+  bestSellers: BestSeller[];
+}
+export interface ShopRef {
+  id: string;
+  name: string;
+  error: string | null;
+}
+export interface StockCell {
+  qty: number;
+  reorder: number;
+  price: number;
+  low: boolean;
+}
+export interface StockRow {
+  name: string;
+  category: string | null;
+  cells: (StockCell | null)[];
+  total: number;
+  priceDiffers: boolean;
+}
+export interface StockMatrix {
+  shops: ShopRef[];
+  rows: StockRow[];
+}
+export interface ShopSale extends Sale {
+  shopId: string;
+  shopName: string;
+}
+export interface ReceiptStore {
+  name: string;
+  address: string | null;
+  phone: string | null;
+  footer: string | null;
+}
+export interface ShopSaleDetail {
+  shopId: string;
+  shopName: string;
+  detail: SaleDetail;
+  store: ReceiptStore;
+}

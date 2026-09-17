@@ -1,5 +1,6 @@
 pub mod audit;
 pub mod auth;
+pub mod overview;
 pub mod products;
 pub mod reports;
 pub mod sales;

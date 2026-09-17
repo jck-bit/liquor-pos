@@ -1,11 +1,16 @@
 <script lang="ts">
-  import type { SaleDetail } from "../types";
+  import type { ReceiptStore, SaleDetail } from "../types";
   import { session } from "../stores/session.svelte";
   import { fmtDateTime, money, receiptNo } from "../format";
 
-  let { detail }: { detail: SaleDetail } = $props();
+  // `store`: header of another shop, for receipts opened from the All shops screen.
+  let { detail, store }: { detail: SaleDetail; store?: ReceiptStore } = $props();
   const s = $derived(detail.sale);
-  const st = $derived(session.settings);
+  const st = $derived(
+    store
+      ? { store_name: store.name, store_address: store.address ?? "", store_phone: store.phone ?? "", receipt_footer: store.footer ?? "" }
+      : session.settings,
+  );
 </script>
 
 <div class="receipt">

@@ -209,9 +209,8 @@
 </div>
 
 <style>
-  .tabs { display: flex; gap: 2px; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius); padding: 2px; }
-  .tabs button, .seg button { border: 0; background: transparent; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-weight: 500; color: var(--ink-2); }
-  .tabs button.on, .seg button.on { background: var(--surface); color: var(--ink); box-shadow: var(--shadow); }
+  .seg button { border: 0; background: transparent; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-weight: 500; color: var(--ink-2); }
+  .seg button.on { background: var(--surface); color: var(--ink); box-shadow: var(--shadow); }
   .seg { display: inline-flex; gap: 2px; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius); padding: 2px; align-self: flex-start; }
   .narrow { max-width: 960px; }
   .strong { font-weight: 500; }

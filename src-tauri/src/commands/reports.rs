@@ -1,6 +1,6 @@
 use std::io::Write;
 
-use rusqlite::params;
+use rusqlite::{params, Connection};
 use tauri::{AppHandle, Manager, State};
 
 use crate::commands::auth::{require_owner, require_user, Session};
@@ -9,7 +9,7 @@ use crate::shops::{slug, Shops};
 use crate::error::{bad, AppResult};
 use crate::models::{DailyPoint, SalesSummary, StockValue, TopProduct};
 
-fn check_range(from: &str, to: &str) -> AppResult<()> {
+pub(crate) fn check_range(from: &str, to: &str) -> AppResult<()> {
     let ok = |s: &str| s.len() == 10 && s.chars().enumerate().all(|(i, c)| if i == 4 || i == 7 { c == '-' } else { c.is_ascii_digit() });
     if !ok(from) || !ok(to) {
         return Err(bad("Dates must be YYYY-MM-DD"));
@@ -21,8 +21,10 @@ fn check_range(from: &str, to: &str) -> AppResult<()> {
 pub fn sales_summary(db: State<Db>, session: State<Session>, from: String, to: String) -> AppResult<SalesSummary> {
     require_user(&session)?;
     check_range(&from, &to)?;
-    let conn = db.lock();
+    sales_summary_for(&db.lock(), &from, &to)
+}
 
+pub(crate) fn sales_summary_for(conn: &Connection, from: &str, to: &str) -> AppResult<SalesSummary> {
     let (sales_count, gross, discounts, net, cash_total, mpesa_total): (i64, i64, i64, i64, i64, i64) = conn
         .prepare_cached(
             "SELECT COUNT(*), COALESCE(SUM(subtotal), 0), COALESCE(SUM(discount), 0), COALESCE(SUM(total), 0),
@@ -64,7 +66,10 @@ pub fn sales_summary(db: State<Db>, session: State<Session>, from: String, to: S
 pub fn daily_sales(db: State<Db>, session: State<Session>, from: String, to: String) -> AppResult<Vec<DailyPoint>> {
     require_user(&session)?;
     check_range(&from, &to)?;
-    let conn = db.lock();
+    daily_sales_for(&db.lock(), &from, &to)
+}
+
+pub(crate) fn daily_sales_for(conn: &Connection, from: &str, to: &str) -> AppResult<Vec<DailyPoint>> {
     let mut stmt = conn.prepare_cached(
         "SELECT day, COUNT(*), SUM(total), SUM(total - cost) FROM (
             SELECT date(s.created_at) AS day, s.total,
@@ -105,7 +110,10 @@ pub fn top_products(
 #[tauri::command]
 pub fn stock_value(db: State<Db>, session: State<Session>) -> AppResult<StockValue> {
     require_user(&session)?;
-    let conn = db.lock();
+    stock_value_for(&db.lock())
+}
+
+pub(crate) fn stock_value_for(conn: &Connection) -> AppResult<StockValue> {
     let mut stmt = conn
         .prepare_cached(
             "SELECT COUNT(*), COALESCE(SUM(stock_qty), 0),

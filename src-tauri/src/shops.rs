@@ -126,6 +126,14 @@ impl Shops {
         reg.shops.iter().find(|s| s.id == reg.current).cloned().unwrap_or_else(|| reg.shops[0].clone())
     }
 
+    pub fn all(&self) -> Vec<Shop> {
+        self.lock().shops.clone()
+    }
+
+    pub fn is_current(&self, id: &str) -> bool {
+        self.lock().current == id
+    }
+
     pub fn get(&self, id: &str) -> AppResult<Shop> {
         self.lock().shops.iter().find(|s| s.id == id).cloned().ok_or_else(|| bad("That shop is not on this computer"))
     }

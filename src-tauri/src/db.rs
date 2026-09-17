@@ -2,7 +2,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard};
 
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, TransactionBehavior};
 
 use crate::error::AppResult;
 
@@ -52,7 +52,11 @@ const MIGRATIONS: &[&str] = &[
 ];
 
 pub fn open(path: &Path) -> AppResult<Connection> {
-    let conn = Connection::open(path)?;
+    let mut conn = Connection::open(path)?;
+    // More than one connection can now write to a shop's file (the open shop, the
+    // background sync of other shops). BEGIN IMMEDIATE makes a writer wait its turn
+    // instead of failing halfway through a read-then-write transaction.
+    conn.set_transaction_behavior(TransactionBehavior::Immediate);
     conn.pragma_update(None, "journal_mode", "WAL")?;
     conn.pragma_update(None, "synchronous", "NORMAL")?;
     conn.pragma_update(None, "foreign_keys", "ON")?;
@@ -60,6 +64,15 @@ pub fn open(path: &Path) -> AppResult<Connection> {
     conn.pragma_update(None, "cache_size", -16000)?; // 16 MB page cache
     migrate(&conn)?;
     Ok(conn)
+}
+
+/// Open a database that must already exist. Used for shops that are not the open
+/// one: a plain `open` would silently create an empty database for a missing file.
+pub fn open_existing(path: &Path) -> AppResult<Connection> {
+    if !path.is_file() {
+        return Err(crate::error::bad("This shop's database file is missing on this computer"));
+    }
+    open(path)
 }
 
 /// Open a shop's database, creating and preparing it on first use.
@@ -70,9 +83,17 @@ pub fn open_shop(path: &Path) -> AppResult<Connection> {
 }
 
 fn migrate(conn: &Connection) -> AppResult<()> {
-    let current: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    for (i, sql) in MIGRATIONS.iter().enumerate().skip(current as usize) {
+    let version = |c: &Connection| c.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0));
+    if version(conn)? as usize >= MIGRATIONS.len() {
+        return Ok(());
+    }
+    for (i, sql) in MIGRATIONS.iter().enumerate() {
+        // Take the write lock first, then look again: another connection to the
+        // same file may have applied this step while we waited.
         let tx = conn.unchecked_transaction()?;
+        if version(&tx)? as usize > i {
+            continue;
+        }
         tx.execute_batch(sql)?;
         tx.pragma_update(None, "user_version", (i + 1) as i64)?;
         tx.commit()?;
@@ -126,6 +147,50 @@ mod tests {
         db.replace(Connection::open_in_memory().unwrap());
         assert!(db.lock_if(started).is_err(), "a pass for the previous shop must not get the new database");
         assert!(db.lock_if(db.generation()).is_ok());
+    }
+
+    fn temp_file(name: &str) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!("liquorpos-db-{name}-{}.db", std::process::id()));
+        for ext in ["", "-wal", "-shm"] {
+            let _ = std::fs::remove_file(format!("{}{ext}", path.display()));
+        }
+        path
+    }
+
+    #[test]
+    fn open_existing_never_creates_a_database() {
+        let path = temp_file("missing");
+        assert!(open_existing(&path).is_err());
+        assert!(!path.exists(), "a missing shop file must stay missing");
+        drop(open_shop(&path).unwrap());
+        assert!(open_existing(&path).is_ok());
+    }
+
+    #[test]
+    fn a_read_then_write_waits_for_another_writer() {
+        let path = temp_file("busy");
+        drop(open_shop(&path).unwrap());
+        let mut a = open_existing(&path).unwrap();
+        let mut b = open_existing(&path).unwrap();
+
+        // A holds the write lock for a moment, as a background sync page would.
+        let holder = std::thread::spawn(move || {
+            let tx = a.transaction().unwrap();
+            tx.execute("INSERT INTO settings (key, value) VALUES ('a', '1')", []).unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            tx.commit().unwrap();
+        });
+        std::thread::sleep(std::time::Duration::from_millis(80));
+
+        // B reads and then writes, like create_sale. It must wait, not fail.
+        let tx = b.transaction().unwrap();
+        let n: i64 = tx.query_row("SELECT COUNT(*) FROM settings", [], |r| r.get(0)).unwrap();
+        tx.execute("INSERT INTO settings (key, value) VALUES ('b', ?1)", params![n.to_string()]).unwrap();
+        tx.commit().unwrap();
+        holder.join().unwrap();
+
+        let both: i64 = b.query_row("SELECT COUNT(*) FROM settings WHERE key IN ('a', 'b')", [], |r| r.get(0)).unwrap();
+        assert_eq!(both, 2);
     }
 
     #[test]

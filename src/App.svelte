@@ -11,6 +11,7 @@
   import Stock from "./lib/screens/Stock.svelte";
   import Sales from "./lib/screens/Sales.svelte";
   import Reports from "./lib/screens/Reports.svelte";
+  import AllShops from "./lib/screens/AllShops.svelte";
   import Audit from "./lib/screens/Audit.svelte";
   import Users from "./lib/screens/Users.svelte";
   import Settings from "./lib/screens/Settings.svelte";
@@ -67,6 +68,8 @@
           <Sales />
         {:else if session.screen === "reports"}
           <Reports />
+        {:else if session.screen === "allshops" && session.isOwner && session.multiShop}
+          <AllShops />
         {:else if session.screen === "audit"}
           <Audit />
         {:else if session.screen === "users"}
