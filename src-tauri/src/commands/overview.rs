@@ -613,6 +613,18 @@ mod tests {
             eprintln!("REPORT sale {} #{} {} {} {:?}", s.shop_name, s.sale.receipt_no, s.sale.created_at, s.sale.total, s.sale.till);
         }
         assert!(o.shops.iter().all(|s| s.figures.is_some()), "every shop should be readable by admin");
+
+        // The working behind the latest stock count of the first shop.
+        let first = shops.all().into_iter().next().unwrap();
+        let conn = db::open_existing(&shops.path_of(&first)).unwrap();
+        if let Some(day) = crate::commands::reports::count_sessions_for(&conn).unwrap().first() {
+            eprintln!("REPORT count day {} products {} short {} over {}", day.day, day.products, day.short_units, day.over_units);
+            for r in crate::commands::reports::count_variance_for(&conn, &day.day).unwrap().iter().take(6) {
+                eprintln!("REPORT working {}: last {:?} sold {} received {} adjusted {} -> expected {} counted {} diff {}",
+                    r.name, r.previous_count, r.sold, r.received, r.adjusted, r.expected, r.counted, r.difference);
+                assert_eq!(r.previous_count.unwrap_or(0) + r.received - r.sold + r.adjusted, r.expected, "{}", r.name);
+            }
+        }
     }
 
     #[test]

@@ -5,6 +5,9 @@
   import { session, toasts } from "../../stores/session.svelte";
   import { fmtDate, fmtTime, int, money } from "../../format";
 
+  const short = (s: string) => s.slice(8, 10) + "/" + s.slice(5, 7);
+  const zero = (n: number) => (n === 0 ? "—" : int(n));
+
   let sessions = $state<CountSession[]>([]);
   let day = $state("");
   let rows = $state<VarianceRow[]>([]);
@@ -62,6 +65,7 @@
         <div>
           <div class="title">{session.storeName} · Stock count results · {fmtDate(day)}</div>
           <div class="muted">Counted by {current?.users || "—"} · {int(rows.length)} products counted, {int(shown.length)} shown</div>
+          <div class="muted">Expected = last count + received − sold ± adjusted. Difference = counted − expected.</div>
         </div>
         {#if current}
           <div class="totals">
@@ -73,25 +77,34 @@
       <table class="table">
         <thead>
           <tr>
-            <th>Product</th><th>Category</th><th class="num">Expected</th><th class="num">Counted</th><th class="num">Difference</th>
-            <th class="num">At selling price</th>{#if hasCosts}<th class="num">At cost</th>{/if}<th>Note</th><th>By</th>
+            <th>Product</th>
+            <th class="num" title="The count before this one">Last count</th>
+            <th class="num">Sold</th><th class="num">Received</th><th class="num" title="Damage and other adjustments">Adjusted</th>
+            <th class="num">Expected</th><th class="num">Counted</th><th class="num">Difference</th>
+            <th class="num">At selling price</th>{#if hasCosts}<th class="num">At cost</th>{/if}<th>Note</th><th class="no-print">By</th>
           </tr>
         </thead>
         <tbody>
           {#each shown as r (r.productId)}
             <tr>
-              <td class="strong">{r.name}</td>
-              <td class="muted">{r.category ?? ""}</td>
+              <td class="strong">{r.name}{#if r.category}<span class="cat no-print"> · {r.category}</span>{/if}</td>
+              <td class="num">
+                {#if r.previousCount === null}<span class="muted" title="Never counted before; the working starts from the first record">first</span>
+                {:else}{int(r.previousCount)} <span class="muted">{short(r.previousAt ?? "")}</span>{/if}
+              </td>
+              <td class="num">{zero(r.sold)}</td>
+              <td class="num">{zero(r.received)}</td>
+              <td class="num">{r.adjusted === 0 ? "—" : signed(r.adjusted)}</td>
               <td class="num">{int(r.expected)}</td>
               <td class="num">{int(r.counted)}</td>
               <td class="num" class:short={r.difference < 0} class:over={r.difference > 0}>{signed(r.difference)}</td>
               <td class="num" class:short={r.difference < 0}>{r.difference ? money(sell(r)) : "—"}</td>
               {#if hasCosts}<td class="num">{r.difference && r.costPrice ? money(cost(r)) : "—"}</td>{/if}
               <td class="muted">{r.note ?? ""}</td>
-              <td class="muted">{r.user} · {fmtTime(r.at)}</td>
+              <td class="muted no-print">{r.user} · {fmtTime(r.at)}</td>
             </tr>
           {:else}
-            <tr><td colspan={hasCosts ? 9 : 8} class="empty">{onlyDifferences ? "Every product counted matched the system." : "Nothing counted that day."}</td></tr>
+            <tr><td colspan={hasCosts ? 12 : 11} class="empty">{onlyDifferences ? "Every product counted matched the system." : "Nothing counted that day."}</td></tr>
           {/each}
         </tbody>
       </table>
@@ -106,6 +119,7 @@
   .totals { font-size: 13px; color: var(--ink-2); text-align: right; display: flex; flex-direction: column; gap: 4px; }
   .strong { font-weight: 500; }
   .short { color: var(--danger); }
+  .cat { color: var(--ink-3); font-weight: 400; font-size: 12px; }
   .over { color: var(--success); }
   .stat .value { font-variant-numeric: normal; }
   @media print {

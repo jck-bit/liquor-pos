@@ -279,6 +279,14 @@ export interface VarianceRow {
   productId: number;
   name: string;
   category: string | null;
+  /** The count before this one, if any, and when it was taken. */
+  previousCount: number | null;
+  previousAt: string | null;
+  /** Movements between the previous count (or the start of records) and this count. */
+  sold: number;
+  received: number;
+  adjusted: number;
+  /** previousCount + received - sold + adjusted */
   expected: number;
   counted: number;
   difference: number;

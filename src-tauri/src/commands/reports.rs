@@ -184,21 +184,42 @@ pub fn count_variance(db: State<Db>, session: State<Session>, day: String) -> Ap
 }
 
 pub(crate) fn count_variance_for(conn: &Connection, day: &str) -> AppResult<Vec<VarianceRow>> {
+    // For each product counted that day: `t1` is its first count of the day and
+    // `prev` the last count before that. The working covers everything between.
     let mut stmt = conn.prepare_cached(
-        "SELECT p.id, p.name, p.category,
-                (SELECT f.count_to - f.qty_delta FROM stock_movements f
-                  WHERE f.product_id = p.id AND f.reason = 'count' AND f.count_to IS NOT NULL AND date(f.created_at) = ?1
-                  ORDER BY f.created_at, f.id LIMIT 1),
-                (SELECT l.count_to FROM stock_movements l
-                  WHERE l.product_id = p.id AND l.reason = 'count' AND l.count_to IS NOT NULL AND date(l.created_at) = ?1
-                  ORDER BY l.created_at DESC, l.id DESC LIMIT 1),
+        "WITH first AS (
+            SELECT product_id, MIN(created_at) AS t1 FROM stock_movements
+            WHERE reason = 'count' AND count_to IS NOT NULL AND date(created_at) = ?1 GROUP BY product_id
+         ), prev AS (
+            SELECT f.product_id, f.t1,
+              (SELECT c.count_to FROM stock_movements c WHERE c.product_id = f.product_id AND c.reason = 'count'
+                 AND c.count_to IS NOT NULL AND c.created_at < f.t1 ORDER BY c.created_at DESC, c.id DESC LIMIT 1) AS level,
+              (SELECT c.created_at FROM stock_movements c WHERE c.product_id = f.product_id AND c.reason = 'count'
+                 AND c.count_to IS NOT NULL AND c.created_at < f.t1 ORDER BY c.created_at DESC, c.id DESC LIMIT 1) AS at
+            FROM first f
+         )
+         SELECT p.id, p.name, p.category, prev.level, prev.at,
+                COALESCE(-(SELECT SUM(s.qty_delta) FROM stock_movements s WHERE s.product_id = p.id AND s.reason = 'sale'
+                    AND s.created_at < prev.t1 AND (prev.at IS NULL OR s.created_at > prev.at)), 0),
+                COALESCE((SELECT SUM(s.qty_delta) FROM stock_movements s WHERE s.product_id = p.id AND s.reason IN ('purchase', 'void')
+                    AND s.created_at < prev.t1 AND (prev.at IS NULL OR s.created_at > prev.at)), 0),
+                COALESCE((SELECT SUM(s.qty_delta) FROM stock_movements s WHERE s.product_id = p.id
+                    AND (s.reason IN ('damage', 'adjustment') OR (s.reason = 'count' AND s.count_to IS NULL))
+                    AND s.created_at < prev.t1 AND (prev.at IS NULL OR s.created_at > prev.at)), 0),
+                (SELECT f.count_to - f.qty_delta FROM stock_movements f WHERE f.product_id = p.id AND f.reason = 'count'
+                    AND f.count_to IS NOT NULL AND date(f.created_at) = ?1 ORDER BY f.created_at, f.id LIMIT 1),
+                (SELECT l.count_to FROM stock_movements l WHERE l.product_id = p.id AND l.reason = 'count'
+                    AND l.count_to IS NOT NULL AND date(l.created_at) = ?1 ORDER BY l.created_at DESC, l.id DESC LIMIT 1),
                 SUM(m.qty_delta), p.sell_price, p.cost_price,
                 (SELECT GROUP_CONCAT(n, '; ') FROM (SELECT DISTINCT x.note AS n FROM stock_movements x
-                  WHERE x.product_id = p.id AND x.reason = 'count' AND x.count_to IS NOT NULL AND date(x.created_at) = ?1 AND x.note IS NOT NULL AND x.note != '')),
+                    WHERE x.product_id = p.id AND x.reason = 'count' AND x.count_to IS NOT NULL AND date(x.created_at) = ?1
+                      AND x.note IS NOT NULL AND x.note != '')),
                 (SELECT GROUP_CONCAT(DISTINCT u.username) FROM stock_movements x JOIN users u ON u.id = x.user_id
-                  WHERE x.product_id = p.id AND x.reason = 'count' AND x.count_to IS NOT NULL AND date(x.created_at) = ?1),
+                    WHERE x.product_id = p.id AND x.reason = 'count' AND x.count_to IS NOT NULL AND date(x.created_at) = ?1),
                 MAX(m.created_at)
-         FROM stock_movements m JOIN products p ON p.id = m.product_id
+         FROM stock_movements m
+         JOIN products p ON p.id = m.product_id
+         JOIN prev ON prev.product_id = p.id
          WHERE m.reason = 'count' AND m.count_to IS NOT NULL AND date(m.created_at) = ?1
          GROUP BY p.id ORDER BY p.name COLLATE NOCASE",
     )?;
@@ -207,14 +228,19 @@ pub(crate) fn count_variance_for(conn: &Connection, day: &str) -> AppResult<Vec<
             product_id: r.get(0)?,
             name: r.get(1)?,
             category: r.get(2)?,
-            expected: r.get(3)?,
-            counted: r.get(4)?,
-            difference: r.get(5)?,
-            sell_price: r.get(6)?,
-            cost_price: r.get(7)?,
-            note: r.get(8)?,
-            user: r.get::<_, Option<String>>(9)?.unwrap_or_default(),
-            at: r.get(10)?,
+            previous_count: r.get(3)?,
+            previous_at: r.get(4)?,
+            sold: r.get(5)?,
+            received: r.get(6)?,
+            adjusted: r.get(7)?,
+            expected: r.get(8)?,
+            counted: r.get(9)?,
+            difference: r.get(10)?,
+            sell_price: r.get(11)?,
+            cost_price: r.get(12)?,
+            note: r.get(13)?,
+            user: r.get::<_, Option<String>>(14)?.unwrap_or_default(),
+            at: r.get(15)?,
         })
     })?;
     Ok(rows.collect::<Result<_, _>>()?)
@@ -332,14 +358,22 @@ mod tests {
         conn.execute_batch(
             "INSERT INTO products (name, category, sell_price, cost_price, stock_qty) VALUES
                ('Product A', 'Cat 1', 30000, 20000, 2), ('Product B', 'Cat 2', 45000, 0, 12), ('Product C', 'Cat 1', 10000, 0, 9);
-             -- Day one: A counted twice (31 -> 10 -> 2), B once (24 -> 12), C once but unchanged.
+             -- Before day one: A was delivered (31) and never counted; B delivered 30 and sold 6.
              INSERT INTO stock_movements (product_id, qty_delta, reason, note, user_id, count_to, created_at) VALUES
+               (1, 31, 'purchase', 'opening', 1, NULL, '2026-09-10 09:00:00'),
+               (2, 30, 'purchase', 'opening', 1, NULL, '2026-09-10 09:00:00'),
+               (2, -6, 'sale', NULL, 1, NULL, '2026-09-11 19:00:00'),
+             -- Day one: A counted twice (31 -> 10 -> 2), B once (24 -> 12), C once but unchanged.
                (1, -21, 'count', 'weekly', 1, 10, '2026-09-13 22:32:00'),
                (1, -8, 'count', 'recount', 1, 2, '2026-09-13 22:33:00'),
                (2, -12, 'count', 'weekly', 1, 12, '2026-09-13 22:35:00'),
                (3, 0, 'count', NULL, 1, 9, '2026-09-13 22:36:00'),
-             -- Day two: B found 3 over.
-               (2, 3, 'count', 'found extra', 1, 15, '2026-09-18 09:00:00'),
+             -- Between the counts B sold 2, took a delivery of 4 and had 1 logged as damaged: expected 13.
+               (2, -2, 'sale', NULL, 1, NULL, '2026-09-15 20:00:00'),
+               (2, 4, 'purchase', 'top up', 1, NULL, '2026-09-16 10:00:00'),
+               (2, -1, 'damage', 'broken', 1, NULL, '2026-09-17 12:00:00'),
+             -- Day two: B found 2 over.
+               (2, 2, 'count', 'found extra', 1, 15, '2026-09-18 09:00:00'),
              -- A plain sale must not appear in count results.
                (2, -1, 'sale', NULL, 1, NULL, '2026-09-18 10:00:00');",
         )
@@ -348,7 +382,7 @@ mod tests {
         let days = count_sessions_for(&conn).unwrap();
         assert_eq!(days.len(), 2);
         assert_eq!(days[0].day, "2026-09-18");
-        assert_eq!((days[0].products, days[0].short_units, days[0].over_units, days[0].over_value), (1, 0, 3, 135_000));
+        assert_eq!((days[0].products, days[0].short_units, days[0].over_units, days[0].over_value), (1, 0, 2, 90_000));
         let d1 = &days[1];
         assert_eq!((d1.products, d1.short_units, d1.over_units), (3, 41, 0), "A is short 29 in total, B 12, C nothing");
         assert_eq!(d1.short_value, 29 * 30000 + 12 * 45000);
@@ -362,6 +396,19 @@ mod tests {
         assert_eq!((a.expected, a.counted, a.difference), (31, 2, -29), "first expected, last counted, net difference");
         assert_eq!(a.note.as_deref(), Some("weekly; recount"));
         assert_eq!((rows[2].expected, rows[2].counted, rows[2].difference), (9, 9, 0));
+        assert_eq!((a.previous_count, a.sold, a.received, a.adjusted), (None, 0, 31, 0), "never counted before: the working starts from the first delivery");
+        let b = &rows[1];
+        assert_eq!((b.previous_count, b.sold, b.received, b.expected, b.counted), (None, 6, 30, 24, 12));
         assert!(count_variance_for(&conn, "2026-09-14").unwrap().is_empty());
+
+        // Day two shows the working since the previous count: 12 counted, sold 2, received 4, 1 damaged -> expected 13, found 15.
+        let rows = count_variance_for(&conn, "2026-09-18").unwrap();
+        assert_eq!(rows.len(), 1);
+        let b = &rows[0];
+        assert_eq!(b.previous_count, Some(12));
+        assert_eq!(b.previous_at.as_deref(), Some("2026-09-13 22:35:00"));
+        assert_eq!((b.sold, b.received, b.adjusted), (2, 4, -1));
+        assert_eq!(b.previous_count.unwrap() + b.received - b.sold + b.adjusted, b.expected, "the working adds up to the expected number");
+        assert_eq!((b.expected, b.counted, b.difference), (13, 15, 2));
     }
 }

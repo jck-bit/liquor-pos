@@ -201,6 +201,14 @@ pub struct VarianceRow {
     pub product_id: i64,
     pub name: String,
     pub category: Option<String>,
+    /// The count before this one, if any, and when it was taken.
+    pub previous_count: Option<i64>,
+    pub previous_at: Option<String>,
+    /// Movements between the previous count (or the start of records) and this count.
+    pub sold: i64,
+    pub received: i64,
+    pub adjusted: i64,
+    /// previous_count + received - sold + adjusted: what the system expected to find.
     pub expected: i64,
     pub counted: i64,
     pub difference: i64,
