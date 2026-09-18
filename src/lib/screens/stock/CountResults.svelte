@@ -28,9 +28,10 @@
   });
 
   const current = $derived(sessions.find((s) => s.day === day));
-  const shown = $derived(onlyDifferences ? rows.filter((r) => r.difference !== 0) : rows);
+  const isBaseline = (r: VarianceRow) => r.previousCount === null;
+  const shown = $derived(onlyDifferences ? rows.filter((r) => !isBaseline(r) && r.difference !== 0) : rows);
   const hasCosts = $derived(rows.some((r) => r.costPrice > 0));
-  const unchanged = $derived(rows.filter((r) => r.difference === 0).length);
+  const unchanged = $derived(rows.filter((r) => !isBaseline(r) && r.difference === 0).length);
   const sell = (r: VarianceRow) => r.difference * r.sellPrice;
   const cost = (r: VarianceRow) => r.difference * r.costPrice;
   const signed = (n: number) => (n > 0 ? `+${int(n)}` : int(n));
@@ -53,7 +54,7 @@
 
     {#if current}
       <div class="grid-stats no-print">
-        <div class="card stat"><div class="label">Products counted</div><div class="value">{int(current.products)}</div><div class="sub">{int(unchanged)} matched the system</div></div>
+        <div class="card stat"><div class="label">Products counted</div><div class="value">{int(current.products)}</div><div class="sub">{current.baselines ? `${int(current.baselines)} first counts set a baseline · ` : ""}{int(unchanged)} matched</div></div>
         <div class="card stat"><div class="label">Missing</div><div class="value short">{int(current.shortUnits)}</div><div class="sub">units short</div></div>
         <div class="card stat"><div class="label">Missing, at selling price</div><div class="value short">{money(current.shortValue)}</div><div class="sub">{hasCosts ? `${money(current.shortCost)} at cost` : "what they would have sold for"}</div></div>
         <div class="card stat"><div class="label">Found extra</div><div class="value">{int(current.overUnits)}</div><div class="sub">units over · {money(current.overValue)}</div></div>
@@ -65,7 +66,7 @@
         <div>
           <div class="title">{session.storeName} · Stock count results · {fmtDate(day)}</div>
           <div class="muted">Counted by {current?.users || "—"} · {int(rows.length)} products counted, {int(shown.length)} shown</div>
-          <div class="muted">Expected = last count + received − sold ± adjusted. Difference = counted − expected.</div>
+          <div class="muted">Expected = last count + received − sold ± adjusted. Difference = counted − expected. A product's first count only sets its baseline.</div>
         </div>
         {#if current}
           <div class="totals">
@@ -97,14 +98,22 @@
               <td class="num">{r.adjusted === 0 ? "—" : signed(r.adjusted)}</td>
               <td class="num">{int(r.expected)}</td>
               <td class="num">{int(r.counted)}</td>
-              <td class="num" class:short={r.difference < 0} class:over={r.difference > 0}>{signed(r.difference)}</td>
-              <td class="num" class:short={r.difference < 0}>{r.difference ? money(sell(r)) : "—"}</td>
-              {#if hasCosts}<td class="num">{r.difference && r.costPrice ? money(cost(r)) : "—"}</td>{/if}
+              {#if isBaseline(r)}
+                <td class="num baseline" title="First count of this product: the earlier figure was never a real count, so nothing is missing or found">
+                  Baseline set{#if r.difference}<span class="muted"> · was {int(r.expected)}</span>{/if}
+                </td>
+                <td class="num muted">—</td>
+                {#if hasCosts}<td class="num muted">—</td>{/if}
+              {:else}
+                <td class="num" class:short={r.difference < 0} class:over={r.difference > 0}>{signed(r.difference)}</td>
+                <td class="num" class:short={r.difference < 0}>{r.difference ? money(sell(r)) : "—"}</td>
+                {#if hasCosts}<td class="num">{r.difference && r.costPrice ? money(cost(r)) : "—"}</td>{/if}
+              {/if}
               <td class="muted">{r.note ?? ""}</td>
               <td class="muted no-print">{r.user} · {fmtTime(r.at)}</td>
             </tr>
           {:else}
-            <tr><td colspan={hasCosts ? 12 : 11} class="empty">{onlyDifferences ? "Every product counted matched the system." : "Nothing counted that day."}</td></tr>
+            <tr><td colspan={hasCosts ? 12 : 11} class="empty">{onlyDifferences ? (current?.baselines === current?.products ? "First count for every product: baselines set, nothing to compare yet." : "Every product counted matched the system.") : "Nothing counted that day."}</td></tr>
           {/each}
         </tbody>
       </table>
@@ -120,6 +129,7 @@
   .strong { font-weight: 500; }
   .short { color: var(--danger); }
   .cat { color: var(--ink-3); font-weight: 400; font-size: 12px; }
+  .baseline { white-space: nowrap; color: var(--ink-2); }
   .over { color: var(--success); }
   .stat .value { font-variant-numeric: normal; }
   @media print {

@@ -174,7 +174,7 @@ What no software can catch is a sale that is never rung up. The answer to that i
 
 1. **Stock > Count sheet** (owners): every active product grouped by category with the system quantity and blank Counted and Note columns. Print it, or tick "Blind count" to hide the system numbers first. "Save as CSV to fill in" writes `count-sheet-<shop>-<date>.csv` to Documents/Liquor POS/exports.
 2. Count the shelves. Enter the numbers under **Stock > Adjust / count** (scan, type the counted quantity, add a note), or fill the `stock` column of the CSV and bring it back through **Products > Import CSV**. Rows left blank are not touched.
-3. **Stock > Count results**: one line per count day with products counted, units missing and found, and what the missing units would have sold for (and their cost, once cost prices are recorded). Pick a day for the product-by-product variance, printable. A product counted twice on the same day shows once, from the first expected number to the last counted one.
+3. **Stock > Count results**: one line per count day with products counted, units missing and found, and what the missing units would have sold for (and their cost, once cost prices are recorded). Pick a day for the product-by-product variance, printable. A product counted twice on the same day shows once, from the first expected number to the last counted one. A product's first ever count only sets its baseline: the figure the system held before it was never a real count, so it is shown as "Baseline set" and left out of the missing and found totals. Each row also shows the working since the previous count: sold, received, adjusted, expected.
 
 The count becomes the new starting point for that shop on every computer, and only sales made after it are subtracted from it.
 

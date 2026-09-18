@@ -137,7 +137,9 @@ pub(crate) fn stock_value_for(conn: &Connection) -> AppResult<StockValue> {
 // ---------- stock counts ----------
 
 /// Count days, newest first. Differences are netted per product within the day,
-/// so a product counted twice the same day is not reported twice.
+/// so a product counted twice the same day is not reported twice. A product's
+/// first ever count only sets its baseline: whatever the system held before it
+/// was never a real count, so it is not reported as missing or found.
 #[tauri::command]
 pub fn count_sessions(db: State<Db>, session: State<Session>) -> AppResult<Vec<CountSession>> {
     require_owner(&session)?;
@@ -146,14 +148,16 @@ pub fn count_sessions(db: State<Db>, session: State<Session>) -> AppResult<Vec<C
 
 pub(crate) fn count_sessions_for(conn: &Connection) -> AppResult<Vec<CountSession>> {
     let mut stmt = conn.prepare_cached(
-        "SELECT day, COUNT(*),
-                COALESCE(SUM(CASE WHEN d < 0 THEN -d END), 0), COALESCE(SUM(CASE WHEN d > 0 THEN d END), 0),
-                COALESCE(SUM(CASE WHEN d < 0 THEN -d * sell END), 0), COALESCE(SUM(CASE WHEN d > 0 THEN d * sell END), 0),
-                COALESCE(SUM(CASE WHEN d < 0 THEN -d * cost END), 0), COALESCE(SUM(CASE WHEN d > 0 THEN d * cost END), 0),
+        "SELECT day, COUNT(*), COALESCE(SUM(baseline), 0),
+                COALESCE(SUM(CASE WHEN NOT baseline AND d < 0 THEN -d END), 0), COALESCE(SUM(CASE WHEN NOT baseline AND d > 0 THEN d END), 0),
+                COALESCE(SUM(CASE WHEN NOT baseline AND d < 0 THEN -d * sell END), 0), COALESCE(SUM(CASE WHEN NOT baseline AND d > 0 THEN d * sell END), 0),
+                COALESCE(SUM(CASE WHEN NOT baseline AND d < 0 THEN -d * cost END), 0), COALESCE(SUM(CASE WHEN NOT baseline AND d > 0 THEN d * cost END), 0),
                 (SELECT GROUP_CONCAT(DISTINCT u.username) FROM stock_movements x JOIN users u ON u.id = x.user_id
                   WHERE x.reason = 'count' AND x.count_to IS NOT NULL AND date(x.created_at) = day)
          FROM (
-            SELECT date(m.created_at) AS day, m.product_id, SUM(m.qty_delta) AS d, MAX(p.sell_price) AS sell, MAX(p.cost_price) AS cost
+            SELECT date(m.created_at) AS day, m.product_id, SUM(m.qty_delta) AS d, MAX(p.sell_price) AS sell, MAX(p.cost_price) AS cost,
+                   NOT EXISTS (SELECT 1 FROM stock_movements c WHERE c.product_id = m.product_id AND c.reason = 'count'
+                               AND c.count_to IS NOT NULL AND date(c.created_at) < date(m.created_at)) AS baseline
             FROM stock_movements m JOIN products p ON p.id = m.product_id
             WHERE m.reason = 'count' AND m.count_to IS NOT NULL
             GROUP BY day, m.product_id
@@ -164,13 +168,14 @@ pub(crate) fn count_sessions_for(conn: &Connection) -> AppResult<Vec<CountSessio
         Ok(CountSession {
             day: r.get(0)?,
             products: r.get(1)?,
-            short_units: r.get(2)?,
-            over_units: r.get(3)?,
-            short_value: r.get(4)?,
-            over_value: r.get(5)?,
-            short_cost: r.get(6)?,
-            over_cost: r.get(7)?,
-            users: r.get::<_, Option<String>>(8)?.unwrap_or_default(),
+            baselines: r.get(2)?,
+            short_units: r.get(3)?,
+            over_units: r.get(4)?,
+            short_value: r.get(5)?,
+            over_value: r.get(6)?,
+            short_cost: r.get(7)?,
+            over_cost: r.get(8)?,
+            users: r.get::<_, Option<String>>(9)?.unwrap_or_default(),
         })
     })?;
     Ok(rows.collect::<Result<_, _>>()?)
@@ -382,11 +387,10 @@ mod tests {
         let days = count_sessions_for(&conn).unwrap();
         assert_eq!(days.len(), 2);
         assert_eq!(days[0].day, "2026-09-18");
-        assert_eq!((days[0].products, days[0].short_units, days[0].over_units, days[0].over_value), (1, 0, 2, 90_000));
+        assert_eq!((days[0].products, days[0].baselines, days[0].short_units, days[0].over_units, days[0].over_value), (1, 0, 0, 2, 90_000));
         let d1 = &days[1];
-        assert_eq!((d1.products, d1.short_units, d1.over_units), (3, 41, 0), "A is short 29 in total, B 12, C nothing");
-        assert_eq!(d1.short_value, 29 * 30000 + 12 * 45000);
-        assert_eq!(d1.short_cost, 29 * 20000, "only A has a cost price");
+        assert_eq!((d1.products, d1.baselines), (3, 3), "every product was counted for the first time");
+        assert_eq!((d1.short_units, d1.over_units, d1.short_value, d1.short_cost), (0, 0, 0, 0), "a first count sets a baseline, it is not a shortage");
         assert_eq!(d1.users, "admin");
 
         let rows = count_variance_for(&conn, "2026-09-13").unwrap();

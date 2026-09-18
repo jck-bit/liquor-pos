@@ -265,6 +265,8 @@ export interface ShopSaleDetail {
 export interface CountSession {
   day: string;
   products: number;
+  /** Products counted for the first time that day: they set a baseline and are left out of short/over. */
+  baselines: number;
   shortUnits: number;
   overUnits: number;
   /** What the missing units would have sold for. */

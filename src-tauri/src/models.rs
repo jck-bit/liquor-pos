@@ -182,6 +182,9 @@ pub struct StockValue {
 pub struct CountSession {
     pub day: String,
     pub products: i64,
+    /// Products counted for the first time that day. They set a baseline and are
+    /// left out of the short/over figures, which only compare count to count.
+    pub baselines: i64,
     pub short_units: i64,
     pub over_units: i64,
     /// What the missing units would have sold for.
