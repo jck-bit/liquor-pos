@@ -5,8 +5,10 @@
   import { session, toasts } from "../stores/session.svelte";
   import { fmtDateTime, fromCents, money, receiptNo, toCents } from "../format";
   import ProductPicker from "../components/ProductPicker.svelte";
+  import CountSheet from "./stock/CountSheet.svelte";
+  import CountResults from "./stock/CountResults.svelte";
 
-  type Tab = "receive" | "adjust" | "movements" | "low";
+  type Tab = "receive" | "adjust" | "sheet" | "results" | "movements" | "low";
   let tab = $state<Tab>("receive");
 
   // Receive
@@ -91,6 +93,8 @@
     <div class="tabs">
       <button class:on={tab === "receive"} onclick={() => loadTab("receive")}>Receive delivery</button>
       <button class:on={tab === "adjust"} onclick={() => loadTab("adjust")}>Adjust / count</button>
+      <button class:on={tab === "sheet"} onclick={() => loadTab("sheet")}>Count sheet</button>
+      <button class:on={tab === "results"} onclick={() => loadTab("results")}>Count results</button>
       <button class:on={tab === "movements"} onclick={() => loadTab("movements")}>Movements</button>
       <button class:on={tab === "low"} onclick={() => loadTab("low")}>Low stock</button>
     </div>
@@ -162,6 +166,10 @@
         {/if}
       </div>
 
+    {:else if tab === "sheet"}
+      <CountSheet />
+    {:else if tab === "results"}
+      <CountResults />
     {:else if tab === "movements"}
       <div class="card table-wrap">
         <table class="table">

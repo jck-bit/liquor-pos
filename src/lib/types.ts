@@ -259,3 +259,32 @@ export interface ShopSaleDetail {
   detail: SaleDetail;
   store: ReceiptStore;
 }
+
+// ---------- stock counts ----------
+
+export interface CountSession {
+  day: string;
+  products: number;
+  shortUnits: number;
+  overUnits: number;
+  /** What the missing units would have sold for. */
+  shortValue: number;
+  overValue: number;
+  /** The same at cost price; zero until cost prices are recorded. */
+  shortCost: number;
+  overCost: number;
+  users: string;
+}
+export interface VarianceRow {
+  productId: number;
+  name: string;
+  category: string | null;
+  expected: number;
+  counted: number;
+  difference: number;
+  sellPrice: number;
+  costPrice: number;
+  note: string | null;
+  user: string;
+  at: string;
+}

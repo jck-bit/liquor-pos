@@ -1,8 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AllShopsOverview, ShopSale, ShopSaleDetail, StockMatrix,
-  AuditEntry, DailyPoint, ImportResult, ImportRow, PaymentMethod, Product, ProductInput, ReceiveLine, Sale, SaleDetail,
-  SaleInput, SalesSummary, ShopList, StockMovement, StockValue, SyncStatus, TopProduct, User,
+  AuditEntry, CountSession, DailyPoint, ImportResult, ImportRow, PaymentMethod, Product, ProductInput, ReceiveLine, Sale, SaleDetail,
+  SaleInput, SalesSummary, ShopList, StockMovement, StockValue, SyncStatus, TopProduct, User, VarianceRow,
 } from "./types";
 
 /** Thin typed wrapper over every backend command. Errors reject with a plain message string. */
@@ -48,6 +48,11 @@ export const api = {
   topProducts: (from: string, to: string, limit = 20) => invoke<TopProduct[]>("top_products", { from, to, limit }),
   stockValue: () => invoke<StockValue>("stock_value"),
   exportSalesCsv: (from: string, to: string) => invoke<string>("export_sales_csv", { from, to }),
+
+  // stock counts
+  countSessions: () => invoke<CountSession[]>("count_sessions"),
+  countVariance: (day: string) => invoke<VarianceRow[]>("count_variance", { day }),
+  exportCountSheetCsv: () => invoke<string>("export_count_sheet_csv"),
 
   // audit + system
   listAudit: (limit = 200, offset = 0) => invoke<AuditEntry[]>("list_audit", { limit, offset }),

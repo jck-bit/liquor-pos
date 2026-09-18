@@ -13,7 +13,7 @@
   );
 </script>
 
-<div class="receipt">
+<div class="receipt print-area">
   <div class="center">
     <div class="store">{st.store_name || "Liquor POS"}</div>
     {#if st.store_address}<div>{st.store_address}</div>{/if}

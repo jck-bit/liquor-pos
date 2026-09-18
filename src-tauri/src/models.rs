@@ -175,3 +175,38 @@ pub struct StockValue {
     pub retail_value: i64,
     pub low_stock_count: i64,
 }
+
+/// One day on which stock was counted.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CountSession {
+    pub day: String,
+    pub products: i64,
+    pub short_units: i64,
+    pub over_units: i64,
+    /// What the missing units would have sold for.
+    pub short_value: i64,
+    pub over_value: i64,
+    /// The same at cost price; zero until cost prices are recorded.
+    pub short_cost: i64,
+    pub over_cost: i64,
+    pub users: String,
+}
+
+/// One product on a count day: what the system expected before the first count
+/// and what was found at the last count of that day.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct VarianceRow {
+    pub product_id: i64,
+    pub name: String,
+    pub category: Option<String>,
+    pub expected: i64,
+    pub counted: i64,
+    pub difference: i64,
+    pub sell_price: i64,
+    pub cost_price: i64,
+    pub note: Option<String>,
+    pub user: String,
+    pub at: String,
+}

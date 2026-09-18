@@ -131,7 +131,13 @@ table.table { width: 100%; border-collapse: collapse; }
 @media print {
   body { background: #fff; overflow: visible; }
   body * { visibility: hidden; }
-  .receipt, .receipt * { visibility: visible; }
-  .receipt { position: absolute; left: 0; top: 0; width: 72mm; padding: 0; }
-  @page { margin: 4mm; }
+  .print-area, .print-area * { visibility: visible; }
+  .print-area { position: absolute; left: 0; top: 0; }
+  .receipt { width: 72mm; padding: 0; }
+  .sheet { width: 100%; }
+  .sheet table { page-break-inside: auto; }
+  .sheet tr { page-break-inside: avoid; }
+  .sheet thead { display: table-header-group; }
+  .no-print { display: none !important; }
+  @page { margin: 10mm; }
 }
