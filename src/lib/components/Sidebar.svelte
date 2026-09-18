@@ -33,9 +33,9 @@
   const items: { key: Screen; label: string; owner?: boolean; multi?: boolean }[] = [
     { key: "sell", label: "Sell" },
     { key: "products", label: "Products" },
-    { key: "stock", label: "Stock" },
+    { key: "stock", label: "Stock", owner: true },
     { key: "sales", label: "Sales" },
-    { key: "reports", label: "Reports" },
+    { key: "reports", label: "Reports", owner: true },
     { key: "allshops", label: "All shops", owner: true, multi: true },
     { key: "audit", label: "Audit log", owner: true },
     { key: "users", label: "Users", owner: true },

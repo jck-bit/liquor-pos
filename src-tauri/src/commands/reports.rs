@@ -3,7 +3,7 @@ use std::io::Write;
 use rusqlite::{params, Connection};
 use tauri::{AppHandle, Manager, State};
 
-use crate::commands::auth::{require_owner, require_user, Session};
+use crate::commands::auth::{require_owner, Session};
 use crate::db::Db;
 use crate::shops::{slug, Shops};
 use crate::error::{bad, AppResult};
@@ -19,7 +19,7 @@ pub(crate) fn check_range(from: &str, to: &str) -> AppResult<()> {
 
 #[tauri::command]
 pub fn sales_summary(db: State<Db>, session: State<Session>, from: String, to: String) -> AppResult<SalesSummary> {
-    require_user(&session)?;
+    require_owner(&session)?;
     check_range(&from, &to)?;
     sales_summary_for(&db.lock(), &from, &to)
 }
@@ -64,7 +64,7 @@ pub(crate) fn sales_summary_for(conn: &Connection, from: &str, to: &str) -> AppR
 
 #[tauri::command]
 pub fn daily_sales(db: State<Db>, session: State<Session>, from: String, to: String) -> AppResult<Vec<DailyPoint>> {
-    require_user(&session)?;
+    require_owner(&session)?;
     check_range(&from, &to)?;
     daily_sales_for(&db.lock(), &from, &to)
 }
@@ -92,7 +92,7 @@ pub fn top_products(
     to: String,
     limit: Option<i64>,
 ) -> AppResult<Vec<TopProduct>> {
-    require_user(&session)?;
+    require_owner(&session)?;
     check_range(&from, &to)?;
     let conn = db.lock();
     let mut stmt = conn.prepare_cached(
@@ -109,7 +109,7 @@ pub fn top_products(
 
 #[tauri::command]
 pub fn stock_value(db: State<Db>, session: State<Session>) -> AppResult<StockValue> {
-    require_user(&session)?;
+    require_owner(&session)?;
     stock_value_for(&db.lock())
 }
 

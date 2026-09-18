@@ -151,7 +151,7 @@ Every computer connected with the same store login shares one history. Within a 
 
 **How stock stays the same everywhere.** Stock is never copied between computers as a number. Each computer rebuilds it from the shared list of stock movements: the most recent count sets the level at the moment it was taken, and every sale, delivery, void or damage after that moves it from there. A count done on the office computer at 10:30pm becomes the till's starting stock, and only sales made after 10:30pm reduce it. Keep computer clocks correct; Windows and macOS do this automatically.
 
-**Who can change stock.** Only owners can receive deliveries, count, record damage, edit products or void sales, on any computer. Cashiers sell and can view sales, reports, movements and low stock.
+**Who sees what.** Cashiers can sell, reprint today's receipts, and see product prices and stock counts. Everything else is for owners: reports and analytics, stock value, stock movements and low-stock lists, cost prices and margins, sales from other days, voids, product and price changes, users and the audit log. The backend enforces the same rules, so nothing is only hidden on screen.
 
 **Users.** Accounts appear on every computer, but a PIN stays on the computer where it was set. To let a cashier log in on another computer, an owner opens Users there and sets their PIN. Accounts with the same username, such as each computer's `admin`, are the same person.
 

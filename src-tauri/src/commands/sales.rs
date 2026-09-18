@@ -187,11 +187,28 @@ pub fn create_sale(db: State<Db>, session: State<Session>, sync: State<Sync>, in
     Ok(detail)
 }
 
+/// The dates a user may look at: owners any range, everyone else today only.
+pub(crate) fn allowed_window(role: &str, from: &str, to: &str, today: &str) -> (String, String) {
+    if role == "owner" {
+        (from.to_string(), to.to_string())
+    } else {
+        (today.to_string(), today.to_string())
+    }
+}
+
+fn today(conn: &Connection) -> AppResult<String> {
+    Ok(conn.query_row("SELECT date('now', 'localtime')", [], |r| r.get(0))?)
+}
+
 #[tauri::command]
 pub fn get_sale(db: State<Db>, session: State<Session>, sale_id: i64) -> AppResult<SaleDetail> {
-    require_user(&session)?;
+    let user = require_user(&session)?;
     let conn = db.lock();
-    load_sale(&conn, sale_id)
+    let detail = load_sale(&conn, sale_id)?;
+    if user.role != "owner" && !detail.sale.created_at.starts_with(&today(&conn)?) {
+        return Err(bad("Only today's sales can be opened. Ask the owner for older receipts."));
+    }
+    Ok(detail)
 }
 
 #[tauri::command]
@@ -203,8 +220,10 @@ pub fn list_sales(
     payment_method: Option<String>,
     limit: Option<i64>,
 ) -> AppResult<Vec<Sale>> {
-    require_user(&session)?;
-    list_sales_for(&db.lock(), &from, &to, payment_method.as_deref(), limit.unwrap_or(500))
+    let user = require_user(&session)?;
+    let conn = db.lock();
+    let (from, to) = allowed_window(&user.role, &from, &to, &today(&conn)?);
+    list_sales_for(&conn, &from, &to, payment_method.as_deref(), limit.unwrap_or(500))
 }
 
 pub(crate) fn list_sales_for(
@@ -272,4 +291,17 @@ pub fn void_sale(db: State<Db>, session: State<Session>, sync: State<Sync>, sale
     drop(conn);
     sync.kick();
     Ok(detail)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::allowed_window;
+
+    #[test]
+    fn a_cashier_only_ever_sees_today() {
+        let today = "2026-09-18";
+        assert_eq!(allowed_window("owner", "2026-09-01", "2026-09-17", today), ("2026-09-01".into(), "2026-09-17".into()));
+        assert_eq!(allowed_window("cashier", "2026-09-01", "2026-09-17", today), (today.into(), today.into()));
+        assert_eq!(allowed_window("cashier", today, today, today), (today.into(), today.into()));
+    }
 }

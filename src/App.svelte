@@ -63,11 +63,11 @@
           <Sell />
         {:else if session.screen === "products"}
           <Products />
-        {:else if session.screen === "stock"}
+        {:else if session.screen === "stock" && session.isOwner}
           <Stock />
         {:else if session.screen === "sales"}
           <Sales />
-        {:else if session.screen === "reports"}
+        {:else if session.screen === "reports" && session.isOwner}
           <Reports />
         {:else if session.screen === "allshops" && session.isOwner && session.multiShop}
           <AllShops />

@@ -2,7 +2,7 @@ use rusqlite::params;
 use tauri::State;
 
 use crate::commands::audit;
-use crate::commands::auth::{require_owner, require_user, Session};
+use crate::commands::auth::{require_owner, Session};
 use crate::sync::Sync;
 use crate::commands::products::{row_to_product, PRODUCT_COLS};
 use crate::db::Db;
@@ -124,7 +124,7 @@ pub fn list_stock_movements(
     product_id: Option<i64>,
     limit: Option<i64>,
 ) -> AppResult<Vec<StockMovement>> {
-    require_user(&session)?;
+    require_owner(&session)?;
     let conn = db.lock();
     let mut stmt = conn.prepare_cached(
         "SELECT m.id, m.product_id, p.name, m.qty_delta, m.reason, m.ref_sale_id, m.note, u.username, m.created_at,
@@ -156,7 +156,7 @@ pub fn list_stock_movements(
 
 #[tauri::command]
 pub fn low_stock_products(db: State<Db>, session: State<Session>) -> AppResult<Vec<Product>> {
-    require_user(&session)?;
+    require_owner(&session)?;
     let conn = db.lock();
     let sql = format!(
         "SELECT {PRODUCT_COLS} FROM products WHERE active = 1 AND stock_qty <= reorder_level ORDER BY stock_qty ASC, name"

@@ -88,7 +88,7 @@
         </tbody>
       </table>
     </div>
-    <p class="muted" style="margin-top: 12px">Cashiers can sell and view sales and reports. Owners can also receive deliveries, count and adjust stock, edit products and prices, void sales, manage users and see the audit log. People added on another computer appear here too, but need a PIN set on this computer before they can log in here.</p>
+    <p class="muted" style="margin-top: 12px">Cashiers can sell, reprint today's receipts and see product prices and stock counts. Everything else is for owners: reports, stock, cost prices, older sales, voids, products and prices, users and the audit log. People added on another computer appear here too, but need a PIN set on this computer before they can log in here.</p>
   </div>
 </div>
 

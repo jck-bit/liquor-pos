@@ -7,6 +7,7 @@
   import Modal from "../components/Modal.svelte";
   import Receipt from "../components/Receipt.svelte";
 
+  // A cashier only ever sees today; the backend enforces the same.
   let from = $state(isoDate());
   let to = $state(isoDate());
   let method = $state<"" | PaymentMethod>("");
@@ -58,9 +59,9 @@
 
 <div class="page">
   <div class="page-header">
-    <h1>Sales</h1>
+    <h1>{session.isOwner ? "Sales" : "Today's sales"}</h1>
     <div class="toolbar">
-      <DateRange bind:from bind:to />
+      {#if session.isOwner}<DateRange bind:from bind:to />{/if}
       <select class="select method" bind:value={method}>
         <option value="">All payments</option>
         <option value="cash">Cash</option>

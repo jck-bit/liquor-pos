@@ -6,7 +6,7 @@ use crate::commands::auth::{require_owner, require_user, Session};
 use crate::sync::Sync;
 use crate::db::Db;
 use crate::error::{bad, AppResult};
-use crate::models::{Product, ProductInput};
+use crate::models::{Product, ProductInput, User};
 
 pub const PRODUCT_COLS: &str =
     "id, barcode, name, category, cost_price, sell_price, stock_qty, reorder_level, active";
@@ -36,7 +36,7 @@ pub fn list_products(
     query: Option<String>,
     include_inactive: Option<bool>,
 ) -> AppResult<Vec<Product>> {
-    require_user(&session)?;
+    let user = require_user(&session)?;
     let q = query.unwrap_or_default().trim().to_string();
     let like = format!("%{q}%");
     let conn = db.lock();
@@ -48,18 +48,29 @@ pub fn list_products(
     );
     let mut stmt = conn.prepare_cached(&sql)?;
     let rows = stmt.query_map(params![include_inactive.unwrap_or(false) as i64, q, like], row_to_product)?;
-    Ok(rows.collect::<Result<_, _>>()?)
+    let products: Vec<Product> = rows.collect::<Result<_, _>>()?;
+    Ok(without_costs(products, &user))
+}
+
+/// Buying prices are only for owners; a cashier gets zero in their place.
+fn without_costs(mut products: Vec<Product>, user: &User) -> Vec<Product> {
+    if user.role != "owner" {
+        for p in &mut products {
+            p.cost_price = 0;
+        }
+    }
+    products
 }
 
 /// Exact barcode lookup, used by the scanner on the sell screen.
 #[tauri::command]
 pub fn find_product_by_barcode(db: State<Db>, session: State<Session>, barcode: String) -> AppResult<Option<Product>> {
-    require_user(&session)?;
+    let user = require_user(&session)?;
     let conn = db.lock();
     let sql = format!("SELECT {PRODUCT_COLS} FROM products WHERE barcode = ?1 AND active = 1");
     let mut stmt = conn.prepare_cached(&sql)?;
     let product = stmt.query_row(params![barcode.trim()], row_to_product).optional()?;
-    Ok(product)
+    Ok(without_costs(product.into_iter().collect(), &user).pop())
 }
 
 #[tauri::command]

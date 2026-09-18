@@ -7,8 +7,7 @@
   import ProductPicker from "../components/ProductPicker.svelte";
 
   type Tab = "receive" | "adjust" | "movements" | "low";
-  // Only owners change stock; cashiers can look at movements and low stock.
-  let tab = $state<Tab>(session.isOwner ? "receive" : "movements");
+  let tab = $state<Tab>("receive");
 
   // Receive
   type Line = { product: Product; qty: number; cost: string };
@@ -90,10 +89,8 @@
   <div class="page-header">
     <h1>Stock</h1>
     <div class="tabs">
-      {#if session.isOwner}
-        <button class:on={tab === "receive"} onclick={() => loadTab("receive")}>Receive delivery</button>
-        <button class:on={tab === "adjust"} onclick={() => loadTab("adjust")}>Adjust / count</button>
-      {/if}
+      <button class:on={tab === "receive"} onclick={() => loadTab("receive")}>Receive delivery</button>
+      <button class:on={tab === "adjust"} onclick={() => loadTab("adjust")}>Adjust / count</button>
       <button class:on={tab === "movements"} onclick={() => loadTab("movements")}>Movements</button>
       <button class:on={tab === "low"} onclick={() => loadTab("low")}>Low stock</button>
     </div>

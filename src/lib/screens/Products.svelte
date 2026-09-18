@@ -146,7 +146,10 @@
         <thead>
           <tr>
             <th>Name</th><th>Category</th><th>Barcode</th>
-            <th class="num">Cost</th><th class="num">Price</th><th class="num">Margin</th><th class="num">Stock</th>
+            {#if session.isOwner}<th class="num">Cost</th>{/if}
+            <th class="num">Price</th>
+            {#if session.isOwner}<th class="num">Margin</th>{/if}
+            <th class="num">Stock</th>
             {#if session.isOwner}<th></th>{/if}
           </tr>
         </thead>
@@ -156,9 +159,9 @@
               <td class="strong">{p.name} {#if !p.active}<span class="badge badge-gray">inactive</span>{/if}</td>
               <td>{p.category ?? ""}</td>
               <td class="mono">{p.barcode ?? ""}</td>
-              <td class="num">{money(p.costPrice)}</td>
+              {#if session.isOwner}<td class="num">{money(p.costPrice)}</td>{/if}
               <td class="num">{money(p.sellPrice)}</td>
-              <td class="num muted">{marginPct(p.costPrice, p.sellPrice)}</td>
+              {#if session.isOwner}<td class="num muted">{marginPct(p.costPrice, p.sellPrice)}</td>{/if}
               <td class="num">
                 {#if p.stockQty <= 0}<span class="badge badge-red">{p.stockQty}</span>
                 {:else if p.stockQty <= p.reorderLevel}<span class="badge badge-amber">{p.stockQty}</span>
